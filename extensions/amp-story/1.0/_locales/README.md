@@ -1,6 +1,6 @@
 # Supported languages
 
-To see a list of the supported languages, see the list of `*.js` files in the [`_locales` directory](https://github.com/ampproject/amphtml/tree/master/extensions/amp-story/1.0/_locales).
+To see the full list of the supported languages, see the list of `*.js` files in the [`_locales` directory](https://github.com/ampproject/amphtml/tree/master/extensions/amp-story/1.0/_locales).
 
 # Language fallbacks
 

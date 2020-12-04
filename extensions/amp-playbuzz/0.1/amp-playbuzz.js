@@ -51,6 +51,10 @@ import {dev, userAssert} from '../../../src/log';
 import {dict} from '../../../src/utils/object';
 import {isExperimentOn} from '../../../src/experiments';
 import {logo, showMoreArrow} from './images';
+import {
+  observeWithSharedInOb,
+  unobserveWithSharedInOb,
+} from '../../../src/viewport-observer';
 import {removeElement} from '../../../src/dom';
 
 class AmpPlaybuzz extends AMP.BaseElement {
@@ -78,6 +82,9 @@ class AmpPlaybuzz extends AMP.BaseElement {
 
     /** @private {?boolean} */
     this.iframeLoaded_ = false;
+
+    /** @private {?boolean} */
+    this.inViewport_ = false;
 
     /** @private {Array<Function>} */
     this.unlisteners_ = [];
@@ -181,6 +188,10 @@ class AmpPlaybuzz extends AMP.BaseElement {
 
   /** @override */
   layoutCallback() {
+    observeWithSharedInOb(
+      this.element,
+      (inViewport) => (this.inViewport_ = inViewport)
+    );
     const iframe = this.element.ownerDocument.createElement('iframe');
     this.iframe_ = iframe;
     iframe.setAttribute('scrolling', 'no');
@@ -199,21 +210,19 @@ class AmpPlaybuzz extends AMP.BaseElement {
     this.applyFillContent(iframe);
     this.element.appendChild(iframe);
 
-    return (this.iframePromise_ = this.loadPromise(iframe).then(
-      function() {
-        this.iframeLoaded_ = true;
-        this.attemptChangeHeight(dev().assertNumber(this.itemHeight_)).catch(
-          () => {
-            /* die */
-          }
-        );
+    return (this.iframePromise_ = this.loadPromise(iframe).then(() => {
+      this.iframeLoaded_ = true;
+      this.attemptChangeHeight(dev().assertNumber(this.itemHeight_)).catch(
+        () => {
+          /* die */
+        }
+      );
 
-        const unlisten = this.getViewport().onChanged(
-          this.sendScrollDataToItem_.bind(this)
-        );
-        this.unlisteners_.push(unlisten);
-      }.bind(this)
-    ));
+      const unlisten = this.getViewport().onChanged(
+        this.sendScrollDataToItem_.bind(this)
+      );
+      this.unlisteners_.push(unlisten);
+    }));
   }
 
   /** @return {!Element} @private */
@@ -263,7 +272,7 @@ class AmpPlaybuzz extends AMP.BaseElement {
    * @param {Function} handler
    */
   listenToPlaybuzzItemMessage_(messageName, handler) {
-    const unlisten = events.listen(this.win, 'message', event =>
+    const unlisten = events.listen(this.win, 'message', (event) =>
       utils.handleMessageByName(this.iframe_, event, messageName, handler)
     );
     this.unlisteners_.push(unlisten);
@@ -298,7 +307,7 @@ class AmpPlaybuzz extends AMP.BaseElement {
    * @param {{height: number, left: number, relayoutAll: boolean, top: number, velocity: number, width: number }} changeEvent
    */
   sendScrollDataToItem_(changeEvent) {
-    if (!this.isInViewport()) {
+    if (!this.inViewport_) {
       return;
     }
 
@@ -321,7 +330,8 @@ class AmpPlaybuzz extends AMP.BaseElement {
 
   /** @override */
   unlayoutCallback() {
-    this.unlisteners_.forEach(unlisten => unlisten());
+    unobserveWithSharedInOb(this.element);
+    this.unlisteners_.forEach((unlisten) => unlisten());
     this.unlisteners_.length = 0;
 
     if (this.iframe_) {
@@ -333,6 +343,6 @@ class AmpPlaybuzz extends AMP.BaseElement {
   }
 }
 
-AMP.extension('amp-playbuzz', '0.1', AMP => {
+AMP.extension('amp-playbuzz', '0.1', (AMP) => {
   AMP.registerElement('amp-playbuzz', AmpPlaybuzz, CSS);
 });

@@ -32,8 +32,6 @@ tags: {  # amp-subscriptions (json)
   unique: true
   mandatory_parent: "HEAD"
   requires_extension: "amp-subscriptions"
-  satisfies: "amp-subscriptions extension .json script"
-  excludes: "amp-access extension .json script"
   attrs: {
     name: "id"
     mandatory: true
@@ -47,7 +45,7 @@ tags: {  # amp-subscriptions (json)
   }
   attr_lists: "nonce-attr"
   cdata: {
-    blacklisted_cdata_regex: {
+    disallowed_cdata_regex: {
       regex: "<!--"
       error_message: "html comments"
     }
@@ -65,7 +63,7 @@ tags: {  # amp-subscriptions-google
   requires_extension: "amp-subscriptions"
   attr_lists: "common-extension-attrs"
 }
-tags: {  # <script cryptokeys>
+tags: {  # <script cryptokeys sha-256-hash>
   html_format: AMP
   tag_name: "SCRIPT"
   spec_name: "cryptokeys .json script"
@@ -77,6 +75,10 @@ tags: {  # <script cryptokeys>
     mandatory: true
     value: ""
     dispatch_key: NAME_VALUE_DISPATCH
+  }
+  attrs: {
+    name: "sha-256-hash"
+    mandatory: true
   }
   attrs: {
     name: "type"
@@ -122,7 +124,7 @@ tags: {  # <script type="application/octet-stream" ciphertext>
     mandatory: true
   }
   cdata: {
-    blacklisted_cdata_regex: {
+    disallowed_cdata_regex: {
       regex: "<!--"
       error_message: "html comments"
     }

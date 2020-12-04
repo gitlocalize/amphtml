@@ -17,6 +17,7 @@
 import {
   findElements,
   resetAllElements,
+  sleep,
   verifyElementsBuilt,
   verifyPromptsHidden,
 } from './common';
@@ -25,24 +26,27 @@ describes.endtoend(
   'amp-consent',
   {
     testUrl:
-      'http://localhost:8000/test/manual/amp-consent/amp-consent-basic-uses.amp.html#amp-geo=mx',
-    experiments: ['amp-consent-geo-override'],
+      'http://localhost:8000/test/fixtures/e2e/amp-consent/amp-consent-basic-uses.amp.html#amp-geo=mx',
     // TODO (micajuineho): Add shadow-demo after #25985 is fixed, and viewer-demo when...
     environments: ['single'],
   },
-  env => {
+  (env) => {
     let controller;
-    let requestBank;
 
     beforeEach(() => {
       controller = env.controller;
-      requestBank = env.requestBank;
     });
 
-    it.skip('should respect server side decision and clear on next visit', async () => {
+    it('should respect server side decision and clear on next visit', async () => {
       resetAllElements();
       const currentUrl = await controller.getCurrentUrl();
       const nextGeoUrl = currentUrl.replace('mx', 'ca');
+
+      // Check the analytics request consentState
+      await sleep(3000);
+      await expect(
+        'http://localhost:8000/amp4test/request-bank/e2e/deposit/tracking?consentState=insufficient'
+      ).to.have.been.sent;
 
       // Block/unblock elements based off of 'reject' from response
       await findElements(controller);
@@ -84,8 +88,10 @@ describes.endtoend(
       });
 
       // Check the analytics request consentState
-      const req = await requestBank.withdraw('tracking');
-      await expect(req.url).to.match(/consentState=sufficient/);
+      await sleep(3000);
+      await expect(
+        'http://localhost:8000/amp4test/request-bank/e2e/deposit/tracking?consentState=sufficient'
+      ).to.have.been.sent;
     });
   }
 );

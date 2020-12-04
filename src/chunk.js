@@ -30,6 +30,7 @@ const TAG = 'CHUNK';
  * @type {boolean}
  */
 let deactivated = /nochunking=1/.test(self.location.hash);
+let allowLongTasks = false;
 
 /**
  * @const {!Promise}
@@ -112,6 +113,14 @@ export function chunkInstanceForTesting(elementOrAmpDoc) {
  */
 export function deactivateChunking() {
   deactivated = true;
+}
+
+/**
+ * Allow continuing macro tasks after a long task (>5ms).
+ * In particular this is the case when AMP runs in the `amp-inabox` ads mode.
+ */
+export function allowLongTasksInChunking() {
+  allowLongTasks = true;
 }
 
 /**
@@ -299,6 +308,11 @@ class Chunks {
     this.boundExecute_ = this.execute_.bind(this);
     /** @private {number} */
     this.durationOfLastExecution_ = 0;
+    /** @private @const {boolean} */
+    this.supportsInputPending_ = !!(
+      this.win_.navigator.scheduling &&
+      this.win_.navigator.scheduling.isInputPending
+    );
 
     /**
      * Set to true if we scheduled a macro or micro task to execute the next
@@ -313,7 +327,7 @@ class Chunks {
       'i-amphtml-no-boilerplate'
     );
 
-    this.win_.addEventListener('message', e => {
+    this.win_.addEventListener('message', (e) => {
       if (getData(e) == 'amp-macro-task') {
         this.execute_(/* idleDeadline */ null);
       }
@@ -440,10 +454,18 @@ class Chunks {
    * @private
    */
   executeAsap_(idleDeadline) {
-    // If we've spent over 5 millseconds executing the
-    // last instruction yeild back to the main thread.
+    // If the user-agent supports isInputPending, use it to break to a macro task as necessary.
+    // Otherwise If we've spent over 5 millseconds executing the
+    // last instruction yield back to the main thread.
     // 5 milliseconds is a magic number.
-    if (this.bodyIsVisible_ && this.durationOfLastExecution_ > 5) {
+    if (
+      !allowLongTasks &&
+      this.bodyIsVisible_ &&
+      (this.supportsInputPending_
+        ? /** @type {!{scheduling: {isInputPending: Function}}} */ (this.win_
+            .navigator).scheduling.isInputPending()
+        : this.durationOfLastExecution_ > 5)
+    ) {
       this.durationOfLastExecution_ = 0;
       this.requestMacroTask_();
       return;

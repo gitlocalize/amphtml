@@ -26,12 +26,12 @@ import {
   redispatch,
 } from '../../../src/iframe-video';
 import {dict} from '../../../src/utils/object';
+import {dispatchCustomEvent, removeElement} from '../../../src/dom';
 import {getData, listen} from '../../../src/event-helper';
 import {getMode} from '../../../src/mode';
 import {installVideoManagerForDoc} from '../../../src/service/video-manager-impl';
 import {isLayoutSizeDefined} from '../../../src/layout';
 import {once} from '../../../src/utils/function';
-import {removeElement} from '../../../src/dom';
 import {userAssert} from '../../../src/log';
 
 const TAG = 'amp-vimeo';
@@ -91,7 +91,7 @@ class AmpVimeo extends AMP.BaseElement {
      * @return {*} TODO(#23582): Specify return type
      * @private
      */
-    this.boundOnMessage_ = e => this.onMessage_(e);
+    this.boundOnMessage_ = (e) => this.onMessage_(e);
 
     /** @private {!UnlistenDef|null} */
     this.unlistenFrame_ = null;
@@ -120,7 +120,9 @@ class AmpVimeo extends AMP.BaseElement {
 
   /** @override */
   layoutCallback() {
-    return this.isAutoplay_().then(isAutoplay => this.buildIframe_(isAutoplay));
+    return this.isAutoplay_().then((isAutoplay) =>
+      this.buildIframe_(isAutoplay)
+    );
   }
 
   /**
@@ -191,13 +193,13 @@ class AmpVimeo extends AMP.BaseElement {
   onReady_() {
     const {element} = this;
 
-    Object.keys(VIMEO_EVENTS).forEach(event => {
+    Object.keys(VIMEO_EVENTS).forEach((event) => {
       this.sendCommand_('addEventListener', event);
     });
 
     Services.videoManagerForDoc(element).register(this);
 
-    element.dispatchCustomEvent(VideoEvents.LOAD);
+    dispatchCustomEvent(element, VideoEvents.LOAD);
   }
 
   /**
@@ -222,6 +224,10 @@ class AmpVimeo extends AMP.BaseElement {
 
     const data = objOrParseJson(eventData);
 
+    if (data == null) {
+      return; // we only process valid json
+    }
+
     if (data['event'] == 'ready' || data['method'] == 'ping') {
       this.onReadyOnce_();
       return;
@@ -243,7 +249,7 @@ class AmpVimeo extends AMP.BaseElement {
         return;
       }
       this.muted_ = muted;
-      element.dispatchCustomEvent(mutedOrUnmutedEvent(muted));
+      dispatchCustomEvent(element, mutedOrUnmutedEvent(muted));
       return;
     }
   }
@@ -380,6 +386,6 @@ class AmpVimeo extends AMP.BaseElement {
   }
 }
 
-AMP.extension(TAG, '0.1', AMP => {
+AMP.extension(TAG, '0.1', (AMP) => {
   AMP.registerElement(TAG, AmpVimeo);
 });

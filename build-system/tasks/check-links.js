@@ -22,11 +22,12 @@ const path = require('path');
 const {getFilesToCheck, usesFilesOrLocalChanges} = require('../common/utils');
 const {gitDiffAddedNameOnlyMaster} = require('../common/git');
 const {green, cyan, red, yellow} = require('ansi-colors');
-const {isTravisBuild} = require('../common/travis');
+const {isCiBuild} = require('../common/ci');
 const {linkCheckGlobs} = require('../test-configs/config');
 const {maybeUpdatePackages} = require('./update-packages');
 
 const LARGE_REFACTOR_THRESHOLD = 20;
+const GITHUB_BASE_PATH = 'https://github.com/ampproject/amphtml/blob/master/';
 
 let filesIntroducedByPr;
 
@@ -46,7 +47,7 @@ async function checkLinks() {
     log(green('INFO:'), 'Skipping check because this is a large refactor.');
     return;
   }
-  if (!isTravisBuild()) {
+  if (!isCiBuild()) {
     log(green('Starting checks...'));
   }
   filesIntroducedByPr = gitDiffAddedNameOnlyMaster();
@@ -61,8 +62,8 @@ async function checkLinks() {
  */
 function reportResults(results) {
   const filesWithDeadLinks = results
-    .filter(result => result.containsDeadLinks)
-    .map(result => result.file);
+    .filter((result) => result.containsDeadLinks)
+    .map((result) => result.file);
   if (filesWithDeadLinks.length > 0) {
     log(
       red('ERROR:'),
@@ -71,7 +72,7 @@ function reportResults(results) {
     );
     log(
       yellow('NOTE 1:'),
-      "Valid links that don't resolve on Travis can be ignored via",
+      "Valid links that don't resolve during CI can be ignored via",
       cyan('ignorePatterns'),
       'in',
       cyan('build-system/tasks/check-links.js') + '.'
@@ -97,7 +98,7 @@ function reportResults(results) {
  * @return {boolean} True if the link points to a file introduced by the PR.
  */
 function isLinkToFileIntroducedByPR(link) {
-  return filesIntroducedByPr.some(file => {
+  return filesIntroducedByPr.some((file) => {
     return file.length > 0 && link.includes(path.parse(file).base);
   });
 }
@@ -133,19 +134,27 @@ function checkLinksInFile(file) {
         return;
       }
       let containsDeadLinks = false;
-      for (const {link, status, statusCode} of results) {
+      for (const result of results) {
+        const {link, statusCode} = result;
+        let {status} = result;
         // Skip links to files that were introduced by the PR.
-        if (isLinkToFileIntroducedByPR(link)) {
-          continue;
+        if (isLinkToFileIntroducedByPR(link) && status == 'dead') {
+          // Log links with the correct github base as alive, otherwise flag deadlinks.
+          const isValid = filesIntroducedByPr.some((file) => {
+            return link === GITHUB_BASE_PATH + file;
+          });
+          if (isValid) {
+            status = 'alive';
+          }
         }
         switch (status) {
           case 'alive':
-            if (!isTravisBuild()) {
+            if (!isCiBuild()) {
               log(`[${green('✔')}] ${link}`);
             }
             break;
           case 'ignored':
-            if (!isTravisBuild()) {
+            if (!isCiBuild()) {
               log(`[${yellow('•')}] ${link}`);
             }
             break;

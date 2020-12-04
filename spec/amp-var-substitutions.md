@@ -139,7 +139,7 @@ Link substitutions are restricted and will only be fulfilled for URLs matching:
 - The page’s canonical origin
 - A white listed origin
 
-To whitelist an origin, include a `amp-link-variable-allowed-origin` `meta` tag in the `head` of your document. To specify multiple domains, separate each domain with a space.
+To allowlist an origin, include a `amp-link-variable-allowed-origin` `meta` tag in the `head` of your document. To specify multiple domains, separate each domain with a space.
 
 ```html
 <meta
@@ -185,19 +185,23 @@ The tables below list the available URL variables grouped by type of usage. Furt
 
 ### Performance
 
-| Variable Name                                           | Platform Variable      | amp-analytics Variable  |
-| ------------------------------------------------------- | ---------------------- | ----------------------- |
-| [Content Load Time](#content-load-time)                 | `CONTENT_LOAD_TIME`    | `${contentLoadTime}`    |
-| [Domain Lookup Time](#domain-lookup-time)               | `DOMAIN_LOOKUP_TIME`   | `${domainLookupTime}`   |
-| [DOM Interactive Time](#dom-interactive-time)           | `DOM_INTERACTIVE_TIME` | `${domInteractiveTime}` |
-| [Navigation Redirect Count](#navigation-redirect-count) | `NAV_REDIRECT_COUNT`   | `${navRedirectCount}`   |
-| [Navigation Timing ](#navigation-timing)                | `NAV_TIMING`           | `${navTiming}`          |
-| [Navigation Type](#navigation-type)                     | `NAV_TYPE`             | `${navType}`            |
-| [Page Download Time](#page-download-time)               | `PAGE_DOWNLOAD_TIME`   | `${pageDownloadTime}`   |
-| [Page Load Time](#page-load-time)                       | `PAGE_LOAD_TIME`       | `${pageLoadTime}`       |
-| [Redirect Time](#redirect-time)                         | `REDIRECT_TIME`        | `${redirectTime}`       |
-| [Server Response Time](#server-response-time)           | `SERVER_RESPONSE_TIME` | `${serverResponseTime}` |
-| [TCP Connection Time](#tcp-connection-time)             | `TCP_CONNECT_TIME`     | `${tcpConnectTime}`     |
+| Variable Name                                           | Platform Variable      | amp-analytics Variable      |
+| ------------------------------------------------------- | ---------------------- | --------------------------- |
+| [Content Load Time](#content-load-time)                 | `CONTENT_LOAD_TIME`    | `${contentLoadTime}`        |
+| [Cumulative Layout Shift](#cumulative-layout-shift)     | N/A                    | `${cumulativeLayoutShift}`  |
+| [Domain Lookup Time](#domain-lookup-time)               | `DOMAIN_LOOKUP_TIME`   | `${domainLookupTime}`       |
+| [DOM Interactive Time](#dom-interactive-time)           | `DOM_INTERACTIVE_TIME` | `${domInteractiveTime}`     |
+| [First Contentful Paint](#first-contentful-paint)       | N/A                    | `${firstContentfulPaint}`   |
+| [First Input Delay](#first-input-delay)                 | N/A                    | `${firstInputDelay}`        |
+| [Largest Contentful Paint](#largest-contentful-paint)   | N/A                    | `${largestContentfulPaint}` |
+| [Navigation Redirect Count](#navigation-redirect-count) | `NAV_REDIRECT_COUNT`   | `${navRedirectCount}`       |
+| [Navigation Timing ](#navigation-timing)                | `NAV_TIMING`           | `${navTiming}`              |
+| [Navigation Type](#navigation-type)                     | `NAV_TYPE`             | `${navType}`                |
+| [Page Download Time](#page-download-time)               | `PAGE_DOWNLOAD_TIME`   | `${pageDownloadTime}`       |
+| [Page Load Time](#page-load-time)                       | `PAGE_LOAD_TIME`       | `${pageLoadTime}`           |
+| [Redirect Time](#redirect-time)                         | `REDIRECT_TIME`        | `${redirectTime}`           |
+| [Server Response Time](#server-response-time)           | `SERVER_RESPONSE_TIME` | `${serverResponseTime}`     |
+| [TCP Connection Time](#tcp-connection-time)             | `TCP_CONNECT_TIME`     | `${tcpConnectTime}`         |
 
 ### Device and Browser
 
@@ -211,10 +215,10 @@ The tables below list the available URL variables grouped by type of usage. Furt
 | [Screen Width](#screen-width)                       | `SCREEN_WIDTH`            | `${screenWidth}`           |
 | [Scroll Height](#scroll-height)                     | `SCROLL_HEIGHT`           | `${scrollHeight}`          |
 | [Scroll Width](#scroll-width)                       | `SCROLL_WIDTH`            | `${scrollWidth}`           |
-| [Scroll Left](#scroll-left)                         | `SCROLL_LEFT`             | `${scrollLeft}`            |
-| [Scroll Top](#scroll-top)                           | `SCROLL_TOP`              | `${scrollTop}`             |
+| [Scroll Left](#scroll-left)                         | N/A                       | `${scrollLeft}`            |
+| [Scroll Top](#scroll-top)                           | N/A                       | `${scrollTop}`             |
 | [Timezone](#timezone)                               | `TIMEZONE`                | `${timezone}`              |
-| [Timezone Code](#timezone-code)                     | `TIMEZONE_CODE`           | `${timezoneCode}`          |
+| [Timezone Code](#timezone-code)                     | N/A                       | `${timezoneCode}`          |
 | [User Agent](#user-agent)                           | `USER_AGENT`              | `${userAgent}`             |
 | [Viewport Height](#viewport-height)                 | `VIEWPORT_HEIGHT`         | `${viewportHeight}`        |
 | [Viewport Width](#viewport-width)                   | `VIEWPORT_WIDTH`          | `${viewportWidth}`         |
@@ -236,6 +240,7 @@ The tables below list the available URL variables grouped by type of usage. Furt
 | [Backgrounded At Start](#backgrounded-at-start)             | N/A               | `${backgroundedAtStart}`      |
 | [Carousel From Slide](#carousel-from-slide)                 | N/A               | `${fromSlide}`                |
 | [Carousel To Slide](#carousel-to-slide)                     | N/A               | `${toSlide}`                  |
+| [Element Id](#element-id)                                   | N/A               | `${elementId}`                |
 | [Element Height](#element-height)                           | N/A               | `${elementHeight}`            |
 | [Element Width](#element-width)                             | N/A               | `${elementWidth}`             |
 | [Element X](#element-x)                                     | N/A               | `${elementX}`                 |
@@ -269,6 +274,23 @@ The tables below list the available URL variables grouped by type of usage. Furt
 | [Variant](#experiment-variant)   | `VARIANT`         | N/A                    | [`<amp-experiment>`](https://github.com/ampproject/amphtml/blob/master/extensions/amp-experiment/amp-experiment.md) |
 | [Variants](#experiment-variants) | `VARIANTS`        | N/A                    | [`<amp-experiment>`](https://github.com/ampproject/amphtml/blob/master/extensions/amp-experiment/amp-experiment.md) |
 | [Geolocation](#geolocation)      | `AMP_GEO`         | `${ampGeo}`            | [`<amp-geo>`](https://github.com/ampproject/amphtml/blob/master/extensions/amp-geo/amp-geo.md)                      |
+
+### Analytics Advanced Variable Syntax
+
+| Variable Name               | Platform Variable | amp-analytics Variable |
+| --------------------------- | ----------------- | ---------------------- |
+| [Default](#default)         | N/A               | `$DEFAULT`             |
+| [SubStr](#string-substr)    | N/A               | `$SUBSTR`              |
+| [Trim](#trim)               | N/A               | `$TRIM`                |
+| [ToLowerCase](#tolowercase) | N/A               | `$TOLOWERCASE`         |
+| [ToUpperCase](#touppercase) | N/A               | `$TOUPPERCASE`         |
+| [Not](#not)                 | N/A               | `$NOT`                 |
+| [Base64](#base64)           | N/A               | `$BASE64`              |
+| [Hash](#hash)               | N/A               | `$HASH`                |
+| [If](#if)                   | N/A               | `$IF`                  |
+| [Replace](#replace)         | N/A               | `$REPLACE`             |
+| [Match](#match)             | N/A               | `$MATCH`               |
+| [Equals](#equals)           | N/A               | `$EQUALS`              |
 
 ### Miscellaneous
 
@@ -528,6 +550,7 @@ You can pass the following arguments into the Client ID variable like a function
 - `cid scope` (Required): The namespace for the Client ID.
 - `amp-user-notification id` (Optional): Use this argument to make the Client ID substitution dependent on the dismissal of a user notification shown to the visitor of the page. In amp-analytics, this is the same as using the [`data-consent-notification-id`](../extensions/amp-analytics/amp-analytics.md) attribute -- you may choose to use either one for the amp-analytics component.
 - `cookie name` (Optional): The name of the fallback cookie when the document is not served by an AMP proxy. If not provided, `cid scope` will be used as the cookie name.
+- `disable backup` (Optional): If set to `true`, then will opt-out of storing the AMP generated CID in Storage as a backup when the document is not served by an AMP proxy. Otherwise, will default into this behavior.
 
 #### Content Load Time
 
@@ -1034,11 +1057,7 @@ Provides the total height of the page in pixels.
 
 Provides the number of pixels that the user has scrolled from left.
 
-- **platform variable**: `SCROLL_LEFT`
-  - Example: <br>
-  ```html
-  <amp-pixel src="https://foo.com/pixel?scrollLeft=SCROLL_LEFT"></amp-pixel>
-  ```
+- **platform variable**: N/A
 - **amp-analytics variable**: `${scrollLeft}`
   - Example value: `100`
 
@@ -1046,11 +1065,7 @@ Provides the number of pixels that the user has scrolled from left.
 
 Provides the number of pixels that the user has scrolled from top.
 
-- **platform variable**: `SCROLL_TOP`
-  - Example: <br>
-  ```html
-  <amp-pixel src="https://foo.com/pixel?st=SCROLL_TOP"></amp-pixel>
-  ```
+- **platform variable**: N/A
 - **amp-analytics variable**: `${scrollTop}`
   - Example value: `0`
 
@@ -1189,11 +1204,7 @@ Provides the user's time-zone offset from UTC, in minutes.
 
 Provides the user's IANA time-zone code (if available).
 
-- **platform variable**: `TIMEZONE_CODE`
-  - Example: <br>
-  ```html
-  <amp-pixel src="https://foo.com/pixel?tz_code=TIMEZONE_CODE"></amp-pixel>
-  ```
+- **platform variable**: N/A
 - **amp-analytics variable**: `${timezoneCode}`
   - Example value: `Europe/Rome`.
 
@@ -1299,3 +1310,67 @@ Provides the viewport width in pixels available for the page rendering. In contr
   ```
 - **amp-analytics variable**: `${viewportWidth}`
   - Example value: `2560`
+
+#### Analytics Advanced Variable Syntax
+
+The following variables are only supported in `<amp-analytics>`
+
+##### Default
+
+Used to assign fallback value when the variable is resolved to empty string.
+
+- Example: `$DEFAULT(${var}, fallback)`
+
+##### String substr
+
+- Example: `$SUBSTR(${var}, 1, 4)`
+
+##### Trim
+
+- Example: `$TRIM(${var})`
+
+##### ToLowerCase
+
+- Example: `$TOLOWERCASE(${var})`
+
+##### ToUpperCase
+
+- Example: `$TOUPPERCASE(TITLE)`
+
+##### Not
+
+Used to convert truth-y/false-y value to `'false'`/`'true'` string.
+
+- Example `$NOT(hello)` = `'false'` and `$NOT()` = `'true'`
+
+##### Base64
+
+- Example `$BASE64(PAGE_VIEW_ID)`
+
+##### Hash
+
+SHA-384 hash
+
+- Example: `$HASH(PAGE_VIEW_ID)`
+
+##### If
+
+An if statement to choose between values
+
+- Example: `$IF(${var}, value1, value2)` resolves to `value2` if `${var}` resolves to falsey value (`'false'`, `''`, `'0'`, `'null'`, `'Nan'` or `'undefined'`), otherwise will resolve to `value1`.
+
+##### Replace
+
+Find an replace all matched pattern.
+
+- Example: `$REPLACE(${var}, matchPattern, replaceStr)`
+
+##### Match
+
+Find the specified (or first) matched pattern.
+
+- Example: `$MATCH(${var}, matchPatter, 0)`
+
+##### Equals
+
+- Example: `$EQUALS(${val}, value)` resolves to `'true'` or `'false'`

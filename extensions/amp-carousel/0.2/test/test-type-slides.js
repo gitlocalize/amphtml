@@ -27,7 +27,7 @@ import {getDetail, listenOncePromise} from '../../../../src/event-helper';
 
 /**
  * @param {!Element} el
- * @param {number=} index An intex to wait for.
+ * @param {number=} index An index to wait for.
  * @return {!Promise<undefined>}
  */
 async function afterIndexUpdate(el, index) {
@@ -62,6 +62,13 @@ function getSlideWrappers(el) {
   );
 }
 
+function isScreenReaderHidden(element) {
+  const computedStyle = getComputedStyle(element);
+  return (
+    computedStyle.visibility === 'hidden' || computedStyle.display === 'none'
+  );
+}
+
 describes.realWin(
   'amp-carousel-0.2 type slides',
   {
@@ -69,7 +76,7 @@ describes.realWin(
       extensions: ['amp-carousel:0.2'],
     },
   },
-  env => {
+  (env) => {
     let win;
     let doc;
     let container;
@@ -156,6 +163,47 @@ describes.realWin(
       expect(slideWrappers[1].getAttribute('aria-hidden')).to.equal('true');
     });
 
+    it('should style snap for container and content correctly', async () => {
+      const carousel = await getCarousel({loop: true});
+      const slideWrappers = getSlideWrappers(carousel);
+      expect(slideWrappers.length).to.equal(5);
+
+      // Ensure that the content has the snap property not wrapper
+      // or else it will break scrolling animation.
+      for (let i = 0; i < slideWrappers.length; i++) {
+        expect(slideWrappers[i].style.scrollSnapAlign).to.equal('');
+        expect(slideWrappers[i].children[0].style.scrollSnapAlign).to.not.equal(
+          ''
+        );
+      }
+    });
+
+    it('should show focus outline and border on next and prev buttons', async () => {
+      const carousel = await getCarousel({loop: false});
+
+      carousel.implementation_.interactionNext();
+      await afterIndexUpdate(carousel);
+
+      const impl = carousel.implementation_;
+      impl.prevButton_.focus();
+      expect(doc.activeElement).to.equal(impl.prevButton_);
+      expect(win.getComputedStyle(impl.prevButton_).outline).to.equal(
+        'rgb(255, 255, 255) solid 1px'
+      );
+      expect(win.getComputedStyle(impl.prevButton_).border).to.equal(
+        '1px solid rgb(0, 0, 0)'
+      );
+
+      impl.nextButton_.focus();
+      expect(doc.activeElement).to.equal(impl.nextButton_);
+      expect(win.getComputedStyle(impl.nextButton_).outline).to.equal(
+        'rgb(255, 255, 255) solid 1px'
+      );
+      expect(win.getComputedStyle(impl.nextButton_).border).to.equal(
+        '1px solid rgb(0, 0, 0)'
+      );
+    });
+
     describe('loop', () => {
       it('should go to the correct slide clicking next', async () => {
         const carousel = await getCarousel({loop: true});
@@ -198,6 +246,28 @@ describes.realWin(
         expect(getNextButton(carousel).getAttribute('aria-disabled')).to.equal(
           'true'
         );
+      });
+
+      it('should correctly style controls; focusable but not visible', async () => {
+        const carousel = await getCarousel({loop: false});
+
+        getNextButton(carousel).focus();
+        carousel.implementation_.goToSlide(4);
+        await afterIndexUpdate(carousel);
+        expect(getNextButton(carousel).getAttribute('tabIndex')).to.equal('-1');
+        expect(getPrevButton(carousel).getAttribute('tabIndex')).to.equal('0');
+        expect(isScreenReaderHidden(getPrevButton(carousel))).to.be.false;
+        expect(isScreenReaderHidden(getNextButton(carousel))).to.be.false;
+        expect(doc.activeElement).to.equal(getNextButton(carousel));
+
+        getPrevButton(carousel).focus();
+        carousel.implementation_.goToSlide(0);
+        await afterIndexUpdate(carousel);
+        expect(getNextButton(carousel).getAttribute('tabIndex')).to.equal('0');
+        expect(getPrevButton(carousel).getAttribute('tabIndex')).to.equal('-1');
+        expect(isScreenReaderHidden(getPrevButton(carousel))).to.be.false;
+        expect(isScreenReaderHidden(getNextButton(carousel))).to.be.false;
+        expect(doc.activeElement).to.equal(getPrevButton(carousel));
       });
     });
 
@@ -263,6 +333,49 @@ describes.realWin(
           /* CustomEvent */ env.sandbox.match.has('detail', {index: 1}),
           ActionTrust.LOW
         );
+      });
+
+      it('should allow string-valued index', async () => {
+        const carousel = await getCarousel({loop: false});
+        const impl = carousel.implementation_;
+        const triggerSpy = env.sandbox.spy(impl.action_, 'trigger');
+
+        impl.executeAction({
+          method: 'goToSlide',
+          args: {index: '1'},
+          trust: ActionTrust.LOW,
+          satisfiesTrust: () => true,
+        });
+        await afterIndexUpdate(carousel);
+
+        expect(triggerSpy).to.have.been.calledWith(
+          carousel,
+          'slideChange',
+          /* CustomEvent */ env.sandbox.match.has('detail', {index: 1}),
+          ActionTrust.LOW
+        );
+      });
+
+      it('should cause error with invalid index', async () => {
+        const carousel = await getCarousel({loop: false});
+        const impl = carousel.implementation_;
+        const triggerSpy = env.sandbox.spy(impl.action_, 'trigger');
+
+        try {
+          allowConsoleError(() => {
+            impl.executeAction({
+              method: 'goToSlide',
+              args: {index: 'one'},
+              trust: ActionTrust.LOW,
+              satisfiesTrust: () => true,
+            });
+          });
+          await afterIndexUpdate(carousel);
+        } catch (expected) {
+          expect(triggerSpy).to.not.have.been.called;
+          return;
+        }
+        expect.fail();
       });
     });
 

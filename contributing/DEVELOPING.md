@@ -35,7 +35,6 @@ Before you start writing code, consult these resources for guidance and guidelin
 - **CSS**: [Writing CSS For AMP Runtime](writing-css.md)
 - **Creating new components**:
   - [Instructions and Guidelines for building an AMP component](building-an-amp-extension.md)
-  - Learn to create your first component in this [codelab](https://codelabs.developers.google.com/codelabs/creating-your-first-amp-component/#0)
   - Watch this [YouTube video](https://youtu.be/FJEhQFNKeaQ?list=PLXTOW_XMsIDTDXYO-NAi2OpEH0zyguvqX) to learn about "Building a new AMP component"
 - **Integrating third-party software, embeds, services**: [Guidelines](../3p/README.md)
 
@@ -91,7 +90,28 @@ We also recommend scanning the [spec](../spec/). The non-element part should hel
 
 ## Builds and releases
 
-- The [AMP buildcop](buildcop.md) helps ensure that AMP's builds remain green (i.e. everything builds and all of the tests pass). If you run into issues with builds that seem unrelated to your changes see if the issue is present on [Travis](https://travis-ci.org/ampproject/amphtml/builds) and send a message to the [#contributing](https://amphtml.slack.com/messages/C9HRJ1GPN) channel on Slack ([sign up for Slack](https://bit.ly/amp-slack-signup)).
+- The [AMP buildcop](buildcop.md) helps ensure that AMP's builds remain green (i.e. everything builds and all of the tests pass). If you run into issues with builds that seem unrelated to your changes see if the issue is present on [Travis](https://travis-ci.com/ampproject/amphtml/builds) and send a message to the [#contributing](https://amphtml.slack.com/messages/C9HRJ1GPN) channel on Slack ([sign up for Slack](https://bit.ly/amp-slack-signup)).
 - Understanding the [AMP release process](release-schedule.md) is useful for understanding when a change in AMP will make it into production and what to do if things go wrong during the rollout of a change.
+
+### Opting in to pre-release channels
+
+Developers and users of AMP can have their browser request AMP JS files from the pre-release channels (**beta**, **experimental**, and **nightly**) for all requests, using an opt-in mechanism.
+
+To opt your browser into the a pre-release channel, go to [the AMP experiments page](https://cdn.ampproject.org/experiments.html) and activate the experiment channel of your choice (see [Beta/Experimental](release-schedule.md#beta-and-experimental-channels) and [Nightly](release-schedule.md##nightly) channels in the [release process](release-schedule.md) document for description of these channels). Please subscribe to our [low-volume announcements](https://groups.google.com/forum/#!forum/amphtml-announce) mailing list to get notified about important/breaking changes about AMP.
+
+**Notes:**
+
+- When you opt into a pre-release channel via the cookie mechanism, you are only affecting the AMP JS libraries in your browser.
+- An alternative to using cookies to opt a page into these pre-release channels is adding `?optin=experimental`/`?optin=beta` to the URL of the AMP runtime (e.g., `https://cdn.ampproject.org/v0.js?optin=beta`).
+  - URL-based opt-in should only be used for development purposes.
+  - Doing so will cause the AMP validator to flag your page as invalid, and prevent it from being included in AMP caches.
+  - There is no valid-AMP way to force visitors to your site to use the _AMP Experimental/Beta Channel_ version of AMP.
+
+**If you find an issue that appears to only occur in the _Experimental/Beta Channel_ version of AMP**:
+
+- please [file an issue](https://github.com/ampproject/amphtml/issues/new) with a description of the problem
+  - include a note that the problem is new to the _Experimental/Beta Channel_ build so that it can be properly prioritized
+  - include a URL to a page that reproduces the problem
+- ping the [AMP Slack #release channel](https://amphtml.slack.com/messages/C4NVAR0H3/) ([sign up for Slack](https://bit.ly/amp-slack-signup)) with the issue you filed so we can delay the push of the _Experimental/Beta Channel_ version to production if needed
 
 ## [Code of conduct](../CODE_OF_CONDUCT.md)

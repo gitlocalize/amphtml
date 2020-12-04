@@ -35,8 +35,7 @@ const {isTravisPullRequestBuild} = require('../common/travis');
 
 const FILENAME = 'visual-diff-tests.js';
 const FILELOGPREFIX = colors.bold(colors.yellow(`${FILENAME}:`));
-const timedExecOrDie = (cmd, unusedFileName) =>
-  timedExecOrDieBase(cmd, FILENAME);
+const timedExecOrDie = (cmd) => timedExecOrDieBase(cmd, FILENAME);
 
 function main() {
   const startTime = startTimer(FILENAME, FILENAME);
@@ -59,7 +58,7 @@ function main() {
       timedExecOrDie('gulp update-packages');
       timedExecOrDie('gulp visual-diff --nobuild');
     } else {
-      timedExecOrDie('gulp visual-diff --nobuild --empty');
+      timedExecOrDie('gulp visual-diff --empty');
       console.log(
         `${FILELOGPREFIX} Skipping`,
         colors.cyan('Visual Diff Tests'),

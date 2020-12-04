@@ -19,9 +19,9 @@ import {Services} from '../../../../src/services';
 import {VideoEvents} from '../../../../src/video-interface';
 import {
   addAttributesToElement,
+  createElementWithAttributes,
   whenUpgradedToCustomElement,
 } from '../../../../src/dom';
-import {htmlFor} from '../../../../src/static-template';
 import {listenOncePromise} from '../../../../src/event-helper';
 import {tryParseJson} from '../../../../src/json';
 
@@ -36,18 +36,16 @@ describes.realWin(
       extensions: ['amp-video-iframe'],
     },
   },
-  env => {
+  (env) => {
     const defaultFixture = 'video-iframe.html';
 
     let win;
     let doc;
     let videoManagerStub;
-    let any;
 
     beforeEach(() => {
       win = env.win;
       doc = win.document;
-      any = env.sandbox.match.any;
 
       videoManagerStub = {
         register: env.sandbox.spy(),
@@ -60,11 +58,12 @@ describes.realWin(
 
     function getIframeSrc(fixture = null) {
       const {port} = location;
-      return `http://iframe.localhost:${port}/test/fixtures/served/${fixture ||
-        defaultFixture}`;
+      return `http://iframe.localhost:${port}/test/fixtures/served/${
+        fixture || defaultFixture
+      }`;
     }
 
-    const layoutConfigAttrs = size =>
+    const layoutConfigAttrs = (size) =>
       !size
         ? {layout: 'fill'}
         : {
@@ -73,19 +72,13 @@ describes.realWin(
             height: size[1],
           };
 
-    function createVideoIframe({size, src} = {}) {
-      const html = htmlFor(doc);
-      const el = html`
-        <amp-video-iframe poster="foo.png"></amp-video-iframe>
-      `;
-      el.setAttribute('src', src || getIframeSrc());
-      addAttributesToElement(el, layoutConfigAttrs(size));
+    function createVideoIframe(attrs = {}, opt_size) {
+      const el = createElementWithAttributes(doc, 'amp-video-iframe', attrs);
+      const {src = getIframeSrc(), poster = 'foo.png'} = attrs;
+      addAttributesToElement(el, {src, poster});
+      addAttributesToElement(el, layoutConfigAttrs(opt_size));
       doc.body.appendChild(el);
       return el;
-    }
-
-    function spyDispatch(el) {
-      return env.sandbox.spy(el, 'dispatchCustomEvent');
     }
 
     function acceptMockedMessages(videoIframe) {
@@ -94,10 +87,17 @@ describes.realWin(
         .returns(true);
     }
 
-    async function layoutAndLoad(videoIframe) {
-      await whenUpgradedToCustomElement(videoIframe);
-      videoIframe.implementation_.layoutCallback();
-      return listenOncePromise(videoIframe, VideoEvents.LOAD);
+    async function layoutAndLoad(element) {
+      await whenUpgradedToCustomElement(element);
+      // getLayoutBox() affects looksLikeTrackingIframe().
+      // Use default width/height of 100 since element is not sized
+      // as expected in test fixture.
+      env.sandbox.stub(element, 'getLayoutBox').returns({
+        width: Number(element.getAttribute('width')) || 100,
+        height: Number(element.getAttribute('height')) || 100,
+      });
+      element.implementation_.layoutCallback();
+      return listenOncePromise(element, VideoEvents.LOAD);
     }
 
     function stubPostMessage(videoIframe) {
@@ -116,6 +116,16 @@ describes.realWin(
     }
 
     describe('#layoutCallback', () => {
+      it('uses data-param-* in src', async () => {
+        const element = createVideoIframe({
+          'data-param-vid': 'my_vid',
+          'data-param-foo-bar': 'foo bar',
+        });
+        await layoutAndLoad(element);
+        const {src} = element.querySelector('iframe');
+        expect(src).to.match(/\?vid=my_vid&fooBar=foo%20bar#.*$/);
+      });
+
       it('sets metadata in iframe name', async () => {
         const metadata = {
           canonicalUrl: 'foo.html',
@@ -169,10 +179,10 @@ describes.realWin(
           [1, 1],
         ];
 
-        trackingSizes.forEach(size => {
-          const {implementation_} = createVideoIframe({size});
+        trackingSizes.forEach((size) => {
+          const {implementation_} = createVideoIframe({}, size);
           allowConsoleError(() => {
-            expect(() => implementation_.buildCallback()).to.throw();
+            expect(() => implementation_.layoutCallback()).to.throw();
           });
         });
       });
@@ -180,16 +190,23 @@ describes.realWin(
 
     describe('#createPlaceholderCallback', () => {
       it('creates an amp-img with the poster as src', () => {
-        const videoIframe = createVideoIframe();
-
-        const placeholder = videoIframe.implementation_.createPlaceholderCallback();
-
+        const poster = 'foo.bar';
+        const placeholder = createVideoIframe({poster}).createPlaceholder();
         expect(placeholder).to.have.attribute('placeholder');
         expect(placeholder.tagName.toLowerCase()).to.equal('amp-img');
         expect(placeholder.getAttribute('layout')).to.equal('fill');
-        expect(placeholder.getAttribute('src')).to.equal(
-          videoIframe.getAttribute('poster')
-        );
+        expect(placeholder.getAttribute('src')).to.equal(poster);
+      });
+
+      it("uses data-param-* in the poster's src", () => {
+        expect(
+          createVideoIframe({
+            'data-param-my-poster-param': 'my param',
+            'data-param-another': 'value',
+          })
+            .createPlaceholder()
+            .getAttribute('src')
+        ).to.match(/\?myPosterParam=my%20param&another=value$/);
       });
     });
 
@@ -211,13 +228,13 @@ describes.realWin(
 
         await layoutAndLoad(videoIframe);
 
-        const dispatch = spyDispatch(videoIframe);
-
         const invalidEvents = 'tacos al pastor'.split(' ');
 
-        invalidEvents.forEach(event => {
+        invalidEvents.forEach((event) => {
+          const spy = env.sandbox.spy();
+          videoIframe.addEventListener(event, spy);
           videoIframe.implementation_.onMessage_({data: {event}});
-          expect(dispatch.withArgs(event)).to.not.have.been.called;
+          expect(spy).to.not.have.been.called;
         });
       });
 
@@ -225,8 +242,6 @@ describes.realWin(
         const videoIframe = createVideoIframe();
 
         await layoutAndLoad(videoIframe);
-
-        const dispatch = spyDispatch(videoIframe);
 
         acceptMockedMessages(videoIframe);
 
@@ -242,8 +257,10 @@ describes.realWin(
 
         for (let i = 0; i < validEvents.length; i++) {
           const event = validEvents[i];
+          const spy = env.sandbox.spy();
+          videoIframe.addEventListener(event, spy);
           videoIframe.implementation_.onMessage_({data: {event}});
-          expect(dispatch.withArgs(event)).to.have.been.calledOnce;
+          expect(spy).to.have.been.calledOnce;
         }
       });
 
@@ -329,7 +346,8 @@ describes.realWin(
 
         it(`should ${verb} custom analytics event ${sufix}`, async () => {
           const videoIframe = createVideoIframe();
-          const dispatch = spyDispatch(videoIframe);
+          const eventSpy = env.sandbox.spy();
+          videoIframe.addEventListener(VideoEvents.CUSTOM_TICK, eventSpy);
 
           await layoutAndLoad(videoIframe);
 
@@ -350,18 +368,16 @@ describes.realWin(
 
           if (accept) {
             const expectedEventVars = {eventType, vars: vars || {}};
-            const expectedDispatch = dispatch.withArgs(
-              VideoEvents.CUSTOM_TICK,
-              expectedEventVars
-            );
             implementation_.onMessage_({data});
-            expect(expectedDispatch).to.have.been.calledOnce;
+            expect(eventSpy).to.be.calledOnce;
+            const eventData = eventSpy.firstCall.firstArg.data;
+            expect(eventData.eventType).to.equal(expectedEventVars.eventType);
+            expect(eventData.vars).to.deep.equal(expectedEventVars.vars);
           } else {
             allowConsoleError(() => {
               expect(() => implementation_.onMessage_({data})).to.throw();
             });
-            expect(dispatch.withArgs(VideoEvents.CUSTOM_TICK, any)).to.not.have
-              .been.called;
+            expect(eventSpy).to.not.have.been.called;
           }
         });
       });
@@ -400,7 +416,7 @@ describes.realWin(
       'fullscreenExit',
     ];
 
-    implementedVideoInterfaceMethods.forEach(method => {
+    implementedVideoInterfaceMethods.forEach((method) => {
       describe(`#${method}`, () => {
         const lowercaseMethod = method.toLowerCase();
 

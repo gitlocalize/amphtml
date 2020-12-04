@@ -17,6 +17,7 @@
 import {
   findElements,
   resetAllElements,
+  sleep,
   verifyElementsBuilt,
   verifyPromptsHidden,
 } from './common';
@@ -25,18 +26,15 @@ describes.endtoend(
   'amp-consent',
   {
     testUrl:
-      'http://localhost:8000/test/manual/amp-consent/amp-consent-basic-uses.amp.html#amp-geo=de',
-    experiments: ['amp-consent-geo-override'],
+      'http://localhost:8000/test/fixtures/e2e/amp-consent/amp-consent-basic-uses.amp.html#amp-geo=de',
     // TODO (micajuineho): Add shadow-demo after #25985 is fixed and viewer-demo when...
     environments: ['single'],
   },
-  env => {
+  (env) => {
     let controller;
-    let requestBank;
 
     beforeEach(() => {
       controller = env.controller;
-      requestBank = env.requestBank;
     });
 
     it('should work with client side decision', async () => {
@@ -98,9 +96,12 @@ describes.endtoend(
         'postPromptUi': false,
       });
 
-      // Check the analytics request consentState
-      const req = await requestBank.withdraw('tracking');
-      await expect(req.url).to.match(/consentState=sufficient/);
+      // Check the analytics request consentState. Wait for 1 second for the
+      // request to arrive to avoid flaky test.
+      await sleep(3000);
+      await expect(
+        'http://localhost:8000/amp4test/request-bank/e2e/deposit/tracking?consentState=sufficient'
+      ).to.have.been.sent;
     });
   }
 );

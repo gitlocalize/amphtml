@@ -16,6 +16,11 @@
 
 import * as dom from '../../../../src/dom';
 import * as service from '../../../../src/service';
+import {
+  Action,
+  UIType,
+  getStoreService,
+} from '../../../amp-story/1.0/amp-story-store-service';
 import {ButtonTextFitter} from '../story-ad-button-text-fitter';
 import {CommonSignals} from '../../../../src/common-signals';
 import {StoryAdAnalytics} from '../story-ad-analytics';
@@ -37,11 +42,12 @@ const pageImplMock = {
   delegateVideoAutoplay: NOOP,
 };
 
-describes.realWin('story-ad-page', {amp: true}, env => {
+describes.realWin('story-ad-page', {amp: true}, (env) => {
   let win;
   let doc;
   let storyAutoAdsEl;
   let storyAdPage;
+  let storeService;
 
   beforeEach(() => {
     win = env.win;
@@ -49,12 +55,14 @@ describes.realWin('story-ad-page', {amp: true}, env => {
     storyAutoAdsEl = doc.createElement('amp-story-auto-ads');
     doc.body.appendChild(storyAutoAdsEl);
     storyAutoAdsEl.getAmpDoc = () => env.ampdoc;
+    storeService = getStoreService(win);
     storyAdPage = new StoryAdPage(
       storyAutoAdsEl.getAmpDoc(),
       baseConfig,
       1, // index
-      new StoryAdLocalization(win),
-      new ButtonTextFitter(env.ampdoc)
+      new StoryAdLocalization(storyAutoAdsEl),
+      new ButtonTextFitter(env.ampdoc),
+      storeService
     );
   });
 
@@ -302,6 +310,7 @@ describes.realWin('story-ad-page', {amp: true}, env => {
       ampAdElement.appendChild(iframe);
       iframe.contentDocument.write(`
         <body>
+          <meta name="amp-cta-type" content="SHOP">
           <amp-ad-exit id="exit-api">
             <script type="application/json">
             {
@@ -314,17 +323,16 @@ describes.realWin('story-ad-page', {amp: true}, env => {
         </body>`);
 
       await ampAdElement.signals().signal(CommonSignals.INI_LOAD);
-
       const created = await storyAdPage.maybeCreateCta();
       expect(created).to.be.true;
       const anchor = doc.querySelector('a');
       expect(anchor.href).to.equal('https://amp.dev/');
-      expect(anchor.textContent).to.equal('Learn More');
+      expect(anchor.textContent).to.equal('Shop Now');
     });
 
     it('throws on missing cta url', async () => {
       expectAsyncConsoleError(
-        '[amp-story-auto-ads:page] Both CTA Type & CTA Url are required in ad response.'
+        '[amp-story-auto-ads:ui] Both CTA Type & CTA Url are required in ad response.'
       );
       ampAdElement.setAttribute('data-vars-ctatype', 'INSTALL');
       const created = await storyAdPage.maybeCreateCta();
@@ -333,7 +341,7 @@ describes.realWin('story-ad-page', {amp: true}, env => {
 
     it('throws on missing cta type', async () => {
       expectAsyncConsoleError(
-        '[amp-story-auto-ads:page] Both CTA Type & CTA Url are required in ad response.'
+        '[amp-story-auto-ads:ui] Both CTA Type & CTA Url are required in ad response.'
       );
       ampAdElement.setAttribute('data-vars-ctaurl', 'INSTALL');
       const created = await storyAdPage.maybeCreateCta();
@@ -373,6 +381,32 @@ describes.realWin('story-ad-page', {amp: true}, env => {
       );
     });
 
+    it('propagates fullbleed state to attribution icon', async () => {
+      storeService.dispatch(Action.TOGGLE_UI, UIType.DESKTOP_FULLBLEED);
+
+      const iframe = doc.createElement('iframe');
+      ampAdElement.appendChild(iframe);
+      iframe.contentDocument.write(`
+          <head>
+            <meta name="amp4ads-vars-cta-type" content="SHOP">
+            <meta name="amp4ads-vars-cta-url" content="https://www.example.com">
+            <meta name="amp4ads-vars-attribution-icon" content="https://googleads.g.doubleclick.net/pagead/images/mtad/ad_choices_blue.png">
+            <meta name="amp4ads-vars-attribution-url" content="https://www.google.com">
+          </head>
+          <body></body>`);
+      await ampAdElement.signals().signal(CommonSignals.INI_LOAD);
+      await storyAdPage.maybeCreateCta();
+
+      const attribution = doc.querySelector('.i-amphtml-story-ad-attribution');
+      expect(attribution).to.have.class('i-amphtml-story-ad-fullbleed');
+
+      storeService.dispatch(Action.TOGGLE_UI, UIType.MOBILE);
+      expect(attribution).not.to.have.class('i-amphtml-story-ad-fullbleed');
+
+      storeService.dispatch(Action.TOGGLE_UI, UIType.DESKTOP_FULLBLEED);
+      expect(attribution).to.have.class('i-amphtml-story-ad-fullbleed');
+    });
+
     it('does not create attribution when missing icon', async () => {
       expectAsyncConsoleError(
         /amp-story-auto-ads attribution icon must be available/
@@ -389,7 +423,7 @@ describes.realWin('story-ad-page', {amp: true}, env => {
 
       await ampAdElement.signals().signal(CommonSignals.INI_LOAD);
       const created = await storyAdPage.maybeCreateCta();
-      expect(created).to.be.false;
+      expect(created).to.be.true;
       const attribution = doc.querySelector('.i-amphtml-story-ad-attribution');
       expect(attribution).not.to.exist;
     });
@@ -410,7 +444,7 @@ describes.realWin('story-ad-page', {amp: true}, env => {
 
       await ampAdElement.signals().signal(CommonSignals.INI_LOAD);
       const created = await storyAdPage.maybeCreateCta();
-      expect(created).to.be.false;
+      expect(created).to.be.true;
       const attribution = doc.querySelector('.i-amphtml-story-ad-attribution');
       expect(attribution).not.to.exist;
     });
@@ -429,7 +463,7 @@ describes.realWin('story-ad-page', {amp: true}, env => {
         storyAutoAdsEl.getAmpDoc(),
         baseConfig,
         1, // index
-        new StoryAdLocalization(win),
+        new StoryAdLocalization(storyAutoAdsEl),
         new ButtonTextFitter(env.ampdoc)
       );
     });

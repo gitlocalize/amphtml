@@ -27,7 +27,7 @@ describes.realWin(
       extensions: ['amp-ima-video'],
     },
   },
-  env => {
+  (env) => {
     const srcUrl = 'http://rmcdn.2mdn.net/Demo/vast_inspector/android.mp4';
     const adTagUrl =
       'https://pubads.g.doubleclick.net/gampad/ads?sz=640x480&iu=/124319096/external/ad_rule_samples&ciu_szs=300x250&ad_rule=1&impl=s&gdfp_req=1&env=vp&output=vmap&unviewed_position_start=1&cust_params=deployment%3Ddevsite%26sample_ar%3Dpremidpost&cmsid=496&vid=short_onecue&correlator=';
@@ -43,15 +43,28 @@ describes.realWin(
 
     function getVideoPlayerMock() {
       return {
-        load: function() {},
-        addEventListener: function() {},
-        removeEventListener: function() {},
-        play: function() {},
-        pause: function() {},
+        load: function () {},
+        addEventListener: function () {},
+        removeEventListener: function () {},
+        play: function () {},
+        pause: function () {},
         muted: false,
         played: {
           length: 0,
         },
+      };
+    }
+
+    function getAdsManagerMock(mock = {}) {
+      return {
+        addEventListener: () => {},
+        destroy: () => {},
+        getRemainingTime: () => mock.remainingTime,
+        init: () => {},
+        resize: () => {},
+        resume: () => {},
+        setVolume: () => {},
+        start: () => {},
       };
     }
 
@@ -179,7 +192,14 @@ describes.realWin(
         },
       ];
 
+      const adPodInfo = {};
+
+      imaVideoObj.onAdLoad({
+        getAd: () => ({getAdPodInfo: () => adPodInfo}),
+      });
+
       tests.forEach(({mock, label, expected}) => {
+        const {remainingTime, totalAds, adPosition} = mock;
         let defaults = videoDefaults;
         if (label) {
           defaults = Object.assign(defaults, {adLabel: label});
@@ -187,12 +207,11 @@ describes.realWin(
         imaVideoObj.imaVideo(win, defaults);
         const {controlsDiv} = imaVideoObj.getPropertiesForTesting();
         const countdownDiv = controlsDiv.querySelector('#ima-countdown > div');
-        imaVideoObj.setAdsManagerForTesting({
-          getRemainingTime: () => mock.remainingTime,
-        });
-        imaVideoObj.onAdProgress({
-          getAdData: () => mock,
-        });
+        const adsManagerMock = getAdsManagerMock({remainingTime});
+        adPodInfo.getTotalAds = () => totalAds;
+        adPodInfo.getAdPosition = () => adPosition;
+        imaVideoObj.setAdsManagerForTesting(adsManagerMock);
+        imaVideoObj.onAdProgress({});
         expect(countdownDiv.textContent).to.eql(expected);
       });
     });
@@ -216,9 +235,7 @@ describes.realWin(
           },
         },
       };
-      const mockAdsManager = {};
-      mockAdsManager.init = function() {};
-      mockAdsManager.start = function() {};
+      const mockAdsManager = getAdsManagerMock();
       const initSpy = env.sandbox.spy(mockAdsManager, 'init');
       const startSpy = env.sandbox.spy(mockAdsManager, 'start');
       imaVideoObj.setAdsManagerForTesting(mockAdsManager);
@@ -287,7 +304,7 @@ describes.realWin(
       const mockGlobal = {};
       mockGlobal.google = {};
       mockGlobal.google.ima = {};
-      mockGlobal.google.ima.AdsRenderingSettings = function() {
+      mockGlobal.google.ima.AdsRenderingSettings = function () {
         return mockAdsRenderingSettings;
       };
       mockGlobal.google.ima.AdErrorEvent = {};
@@ -300,14 +317,9 @@ describes.realWin(
         CONTENT_PAUSE_REQUESTED: 'cpr',
         CONTENT_RESUME_REQUESTED: 'crr',
       };
-      const mockAdsManager = {
-        addEventListener() {},
-        setVolume() {},
-      };
+      const mockAdsManager = getAdsManagerMock();
       const mockAdsManagerLoadedEvent = {
-        getAdsManager() {
-          return mockAdsManager;
-        },
+        getAdsManager: () => mockAdsManager,
       };
       const amleSpy = env.sandbox.spy(
         mockAdsManagerLoadedEvent,
@@ -351,7 +363,7 @@ describes.realWin(
       const mockGlobal = {};
       mockGlobal.google = {};
       mockGlobal.google.ima = {};
-      mockGlobal.google.ima.AdsRenderingSettings = function() {
+      mockGlobal.google.ima.AdsRenderingSettings = function () {
         return mockAdsRenderingSettings;
       };
       mockGlobal.google.ima.AdErrorEvent = {};
@@ -361,17 +373,14 @@ describes.realWin(
       mockGlobal.google.ima.AdEvent = {};
       mockGlobal.google.ima.AdEvent.Type = {
         AD_PROGRESS: 'adprogress',
+        PAUSED: 'paused',
+        RESUMED: 'resumed',
         CONTENT_PAUSE_REQUESTED: 'cpr',
         CONTENT_RESUME_REQUESTED: 'crr',
       };
-      const mockAdsManager = {
-        addEventListener() {},
-        setVolume() {},
-      };
+      const mockAdsManager = getAdsManagerMock();
       const mockAdsManagerLoadedEvent = {
-        getAdsManager() {
-          return mockAdsManager;
-        },
+        getAdsManager: () => mockAdsManager,
       };
       const amleSpy = env.sandbox.spy(
         mockAdsManagerLoadedEvent,
@@ -397,6 +406,8 @@ describes.realWin(
       );
       expect(addEventListenerSpy).to.be.calledWith('aderror');
       expect(addEventListenerSpy).to.be.calledWith('adprogress');
+      expect(addEventListenerSpy).to.be.calledWith('paused');
+      expect(addEventListenerSpy).to.be.calledWith('resumed');
       expect(addEventListenerSpy).to.be.calledWith('cpr');
       expect(addEventListenerSpy).to.be.calledWith('crr');
       expect(setVolumeSpy).to.be.calledWith(0);
@@ -422,7 +433,7 @@ describes.realWin(
       //expect(playVideoSpy).to.have.been.called;
     });
 
-    it.skip('handles ad error', () => {
+    it('handles ad error', () => {
       const div = doc.createElement('div');
       div.setAttribute('id', 'c');
       doc.body.appendChild(div);
@@ -433,9 +444,9 @@ describes.realWin(
         src: srcUrl,
         tag: adTagUrl,
       });
-      const adsManagerMock = {destroy() {}};
+      const adsManagerMock = getAdsManagerMock();
       const destroySpy = env.sandbox.spy(adsManagerMock, 'destroy');
-      //const playVideoSpy = env.sandbox.spy(imaVideoObj, 'playVideo');
+      //const playVideoSpy = sandbox.spy(imaVideoObj, 'playVideo');
       imaVideoObj.setAdsManagerForTesting(adsManagerMock);
 
       imaVideoObj.onAdError();
@@ -445,11 +456,11 @@ describes.realWin(
       //expect(playVideoSpy).to.have.been.called;
     });
 
-    it.skip('pauses content', () => {
+    it('pauses content', () => {
+      // set up test
       const div = doc.createElement('div');
       div.setAttribute('id', 'c');
       doc.body.appendChild(div);
-
       imaVideoObj.imaVideo(win, {
         width: 640,
         height: 360,
@@ -464,16 +475,19 @@ describes.realWin(
       //const hideControlsSpy = env.sandbox.spy(imaVideoObj, 'hideControls');
       const pauseSpy = env.sandbox.spy(videoMock, 'pause');
       imaVideoObj.setVideoPlayerForTesting(videoMock);
+      let properties = imaVideoObj.getPropertiesForTesting();
+      expect(properties.adsActive).to.be.false;
 
+      // run test
       imaVideoObj.onContentPauseRequested();
 
-      expect(imaVideoObj.getPropertiesForTesting().adsActive).to.be.true;
+      // check results
+      properties = imaVideoObj.getPropertiesForTesting();
+      expect(properties.adsActive).to.be.true;
       expect(removeEventListenerSpy).to.have.been.calledWith(
-        imaVideoObj.getPropertiesForTesting().interactEvent
+        properties.interactEvent
       );
-      expect(
-        imaVideoObj.getPropertiesForTesting().adContainerDiv.style.display
-      ).to.eql('block');
+      expect(properties.adContainerDiv.style.display).to.eql('block');
       expect(removeEventListenerSpy).to.have.been.calledWith('ended');
       // TODO - Fix when I can spy on internals.
       //expect(hideControlsSpy).to.have.been.called;
@@ -481,10 +495,10 @@ describes.realWin(
     });
 
     it('pauses content and resizes ads manager', () => {
+      // set up test
       const div = doc.createElement('div');
       div.setAttribute('id', 'c');
       doc.body.appendChild(div);
-
       imaVideoObj.imaVideo(win, {
         width: 640,
         height: 360,
@@ -499,7 +513,7 @@ describes.realWin(
       //const hideControlsSpy = env.sandbox.spy(imaVideoObj, 'hideControls');
       const pauseSpy = env.sandbox.spy(videoMock, 'pause');
       imaVideoObj.setVideoPlayerForTesting(videoMock);
-      const adsManagerMock = {resize: () => {}};
+      const adsManagerMock = getAdsManagerMock();
       const mockGlobal = {
         google: {
           ima: {
@@ -513,21 +527,19 @@ describes.realWin(
       imaVideoObj.setAdsManagerDimensionsOnLoadForTesting(100, 200);
       imaVideoObj.setAdsManagerForTesting(adsManagerMock);
 
+      // run test
       imaVideoObj.onContentPauseRequested(mockGlobal);
 
+      // check results
+      const properties = imaVideoObj.getPropertiesForTesting();
       expect(resizeSpy).to.have.been.calledWith(100, 200, 'normal');
-      expect(imaVideoObj.getPropertiesForTesting().adsManagerWidthOnLoad).to.be
-        .null;
-      expect(imaVideoObj.getPropertiesForTesting().adsManagerHeightOnLoad).to.be
-        .null;
-
-      expect(imaVideoObj.getPropertiesForTesting().adsActive).to.be.true;
+      expect(properties.adsManagerWidthOnLoad).to.be.null;
+      expect(properties.adsManagerHeightOnLoad).to.be.null;
+      expect(properties.adsActive).to.be.true;
       expect(removeEventListenerSpy).to.have.been.calledWith(
-        imaVideoObj.getPropertiesForTesting().interactEvent
+        properties.interactEvent
       );
-      expect(
-        imaVideoObj.getPropertiesForTesting().adContainerDiv.style.display
-      ).to.eql('block');
+      expect(properties.adContainerDiv.style.display).to.eql('block');
       expect(removeEventListenerSpy).to.have.been.calledWith('ended');
       // TODO - Fix when I can spy on internals.
       //expect(hideControlsSpy).to.have.been.called;
@@ -545,9 +557,7 @@ describes.realWin(
         tag: adTagUrl,
       });
       const videoMock = getVideoPlayerMock();
-      const adsManagerMock = {
-        resize: function() {},
-      };
+      const adsManagerMock = getAdsManagerMock();
       const mockGlobal = {
         google: {
           ima: {
@@ -584,7 +594,7 @@ describes.realWin(
       // expect a subset of controls to be hidden / displayed
       expect(controlsDiv.style.display).not.to.eql('none');
       expect(countdownWrapperDiv.style.display).not.to.eql('none');
-      expect(playPauseDiv.style.display).to.eql('none');
+      expect(playPauseDiv.style.display).not.to.eql('none');
       expect(timeDiv.style.display).to.eql('none');
       expect(progressBarWrapperDiv.style.display).to.eql('none');
       expect(muteUnmuteDiv.style.display).not.to.eql('none');
@@ -592,10 +602,10 @@ describes.realWin(
     });
 
     it('resumes content', () => {
+      // set up test
       const div = doc.createElement('div');
       div.setAttribute('id', 'c');
       doc.body.appendChild(div);
-
       imaVideoObj.imaVideo(win, {
         width: 640,
         height: 360,
@@ -611,22 +621,68 @@ describes.realWin(
       imaVideoObj.setVideoPlayerForTesting(videoMock);
       imaVideoObj.setContentCompleteForTesting(false);
 
+      // run test
       imaVideoObj.onContentResumeRequested();
 
-      expect(imaVideoObj.getPropertiesForTesting().adsActive).to.be.false;
+      // check results
+      const properties = imaVideoObj.getPropertiesForTesting();
+      expect(properties.adsActive).to.be.false;
       expect(addEventListenerSpy).to.have.been.calledWith(
-        imaVideoObj.getPropertiesForTesting().interactEvent
+        properties.interactEvent
       );
       expect(addEventListenerSpy).to.have.been.calledWith('ended');
       // TODO - Fix when I can spy on internals.
       //expect(playVideoSpy).to.have.been.called;
     });
 
-    it('resumes content with content complete', () => {
+    it('changes controls when ad pauses and resumes', () => {
+      // set up test
       const div = doc.createElement('div');
       div.setAttribute('id', 'c');
       doc.body.appendChild(div);
+      imaVideoObj.imaVideo(win, {
+        width: 640,
+        height: 360,
+        src: srcUrl,
+        tag: adTagUrl,
+      });
+      const videoMock = getVideoPlayerMock();
+      //const playVideoSpy = env.sandbox.spy(imaVideoObj, 'playVideo');
+      imaVideoObj.setVideoPlayerForTesting(videoMock);
+      imaVideoObj.setContentCompleteForTesting(false);
 
+      // start ad
+      imaVideoObj.onContentResumeRequested();
+
+      // verify original
+      const {controlsDiv} = imaVideoObj.getPropertiesForTesting();
+      const playPauseDiv = controlsDiv.querySelector('#ima-play-pause');
+      expect(playPauseDiv).to.not.be.null;
+      expect(playPauseDiv.style.display).not.to.eql('none');
+      expect(playPauseDiv.innerHTML).equal(
+        imaVideoObj.getPropertiesForTesting().icons['pause']
+      );
+
+      // run test
+      imaVideoObj.onAdPaused();
+      expect(playPauseDiv.style.display).not.to.eql('none');
+      expect(playPauseDiv.innerHTML).equal(
+        imaVideoObj.getPropertiesForTesting().icons['play']
+      );
+
+      // run test
+      imaVideoObj.onAdResumed();
+      expect(playPauseDiv.style.display).not.to.eql('none');
+      expect(playPauseDiv.innerHTML).equal(
+        imaVideoObj.getPropertiesForTesting().icons['pause']
+      );
+    });
+
+    it('resumes content with content complete', () => {
+      // set up test
+      const div = doc.createElement('div');
+      div.setAttribute('id', 'c');
+      doc.body.appendChild(div);
       imaVideoObj.imaVideo(win, {
         width: 640,
         height: 360,
@@ -642,11 +698,14 @@ describes.realWin(
       imaVideoObj.setVideoPlayerForTesting(videoMock);
       imaVideoObj.setContentCompleteForTesting(true);
 
+      // run test
       imaVideoObj.onContentResumeRequested();
 
-      expect(imaVideoObj.getPropertiesForTesting().adsActive).to.be.false;
+      // check results
+      const properties = imaVideoObj.getPropertiesForTesting();
+      expect(properties.adsActive).to.be.false;
       expect(addEventListenerSpy).to.have.been.calledWith(
-        imaVideoObj.getPropertiesForTesting().interactEvent
+        properties.interactEvent
       );
       expect(addEventListenerSpy).to.have.been.calledWith('ended');
       // TODO - Fix when I can spy on internals.
@@ -685,7 +744,7 @@ describes.realWin(
       imaVideoObj.showAdControls();
       expect(controlsDiv.style.display).not.to.eql('none');
       expect(countdownWrapperDiv.style.display).not.to.eql('none');
-      expect(playPauseDiv.style.display).to.eql('none');
+      expect(playPauseDiv.style.display).not.to.eql('none');
       expect(timeDiv.style.display).to.eql('none');
       expect(progressBarWrapperDiv.style.display).to.eql('none');
       expect(muteUnmuteDiv.style.display).not.to.eql('none');
@@ -1055,8 +1114,7 @@ describes.realWin(
       });
       const videoMock = getVideoPlayerMock();
       imaVideoObj.setVideoPlayerForTesting(videoMock);
-      const adsManagerMock = {};
-      adsManagerMock.setVolume = () => {};
+      const adsManagerMock = getAdsManagerMock();
       imaVideoObj.setAdsManagerForTesting(adsManagerMock);
       imaVideoObj.setVideoPlayerMutedForTesting(false);
       //const pauseVideoSpy = env.sandbox.spy(imaVideoObj, 'pauseVideo');
@@ -1082,8 +1140,7 @@ describes.realWin(
       });
       const videoMock = getVideoPlayerMock();
       imaVideoObj.setVideoPlayerForTesting(videoMock);
-      const adsManagerMock = {};
-      adsManagerMock.setVolume = () => {};
+      const adsManagerMock = getAdsManagerMock();
       imaVideoObj.setAdsManagerForTesting(adsManagerMock);
       imaVideoObj.setVideoPlayerMutedForTesting(true);
       //const pauseVideoSpy = env.sandbox.spy(imaVideoObj, 'pauseVideo');
@@ -1195,7 +1252,7 @@ describes.realWin(
     });
 
     const hoverEventsToTest = ['click', 'mousemove'];
-    hoverEventsToTest.forEach(hoverEvent => {
+    hoverEventsToTest.forEach((hoverEvent) => {
       it(
         `shows controls on ${hoverEvent} (hover)` +
           ' while playing after hidden',
@@ -1242,7 +1299,7 @@ describes.realWin(
         }
       );
 
-      it(`throttles ${hoverEvent} (hover) for showing controls`, async function() {
+      it(`throttles ${hoverEvent} (hover) for showing controls`, async function () {
         const div = doc.createElement('div');
         div.setAttribute('id', 'c');
         doc.body.appendChild(div);

@@ -20,7 +20,6 @@ const colors = require('ansi-colors');
 const fs = require('fs');
 const JSON5 = require('json5');
 const path = require('path');
-const sleep = require('sleep-promise');
 const {
   createCtrlcHandler,
   exitCtrlcHandler,
@@ -28,9 +27,10 @@ const {
 const {
   escapeHtml,
   log,
-  waitForLoaderDots,
+  waitForPageLoad,
   verifySelectorsInvisible,
   verifySelectorsVisible,
+  sleep,
 } = require('./helpers');
 const {
   gitBranchName,
@@ -38,21 +38,35 @@ const {
   gitTravisMasterBaseline,
   shortSha,
 } = require('../../common/git');
-const {execOrDie, execScriptAsync} = require('../../common/exec');
+const {buildRuntime, installPackages} = require('../../common/utils');
+const {execScriptAsync} = require('../../common/exec');
 const {isTravisBuild} = require('../../common/travis');
 const {startServer, stopServer} = require('../serve');
+const {waitUntilUsed} = require('tcp-port-used');
 
 // optional dependencies for local development (outside of visual diff tests)
 let puppeteer;
 let percySnapshot;
 
-// CSS widths: iPhone: 375, Pixel: 411, Desktop: 1400.
-const DEFAULT_SNAPSHOT_OPTIONS = {widths: [375, 411, 1400]};
-const SNAPSHOT_SINGLE_BUILD_OPTIONS = {widths: [375]};
+// CSS injected in every page tested.
+// Normally, as in https://docs.percy.io/docs/percy-specific-css
+// Otherwise, as a <style> in an iframe, see snippets/iframe-wrapper.js
+const percyCss = [
+  // Loader animation may otherwise be captured in slightly different points,
+  // causing the test to flake.
+  '.i-amphtml-new-loader * { animation: none !important; }',
+].join('\n');
+
+const SNAPSHOT_SINGLE_BUILD_OPTIONS = {
+  widths: [375],
+};
 const VIEWPORT_WIDTH = 1400;
 const VIEWPORT_HEIGHT = 100000;
 const HOST = 'localhost';
 const PORT = 8000;
+const PERCY_AGENT_PORT = 5338;
+const PERCY_AGENT_RETRY_MS = 100;
+const PERCY_AGENT_TIMEOUT_MS = 5000;
 const NAVIGATE_TIMEOUT_MS = 30000;
 const MAX_PARALLEL_TABS = 5;
 const WAIT_FOR_TABS_MS = 1000;
@@ -72,6 +86,10 @@ const FREEZE_FORM_VALUE_SNIPPET = fs.readFileSync(
   path.resolve(__dirname, 'snippets/freeze-form-values.js'),
   'utf8'
 );
+const FREEZE_CANVAS_IMAGE_SNIPPET = fs.readFileSync(
+  path.resolve(__dirname, 'snippets/freeze-canvas-image.js'),
+  'utf8'
+);
 
 // HTML snippet to create an error page snapshot.
 const SNAPSHOT_ERROR_SNIPPET = fs.readFileSync(
@@ -86,7 +104,7 @@ let percyAgentProcess_;
  * Override PERCY_* environment variables if passed via gulp task parameters.
  */
 function maybeOverridePercyEnvironmentVariables() {
-  ['percy_token', 'percy_branch'].forEach(variable => {
+  ['percy_token', 'percy_branch'].forEach((variable) => {
     if (variable in argv) {
       process.env[variable.toUpperCase()] = argv[variable];
     }
@@ -131,11 +149,20 @@ async function launchPercyAgent() {
   }
 
   const env = argv.percy_agent_debug ? {LOG_LEVEL: 'debug'} : {};
-  percyAgentProcess_ = execScriptAsync('npx percy start', {
-    cwd: __dirname,
-    env: Object.assign(env, process.env),
-    stdio: ['ignore', process.stdout, process.stderr],
-  });
+  percyAgentProcess_ = execScriptAsync(
+    `npx percy start --port ${PERCY_AGENT_PORT}`,
+    {
+      cwd: __dirname,
+      env: Object.assign(env, process.env),
+      stdio: ['ignore', process.stdout, process.stderr],
+    }
+  );
+  await waitUntilUsed(
+    PERCY_AGENT_PORT,
+    PERCY_AGENT_RETRY_MS,
+    PERCY_AGENT_TIMEOUT_MS
+  );
+  log('info', 'Percy agent is reachable on port', PERCY_AGENT_PORT);
 }
 
 /**
@@ -170,12 +197,6 @@ async function launchBrowser() {
     log('fatal', error);
   }
 
-  // Every action on the browser or its pages adds a listener to the
-  // Puppeteer.Connection.Events.Disconnected event. This is a temporary
-  // workaround for the Node runtime warning that is emitted once 11 listeners
-  // are added to the same object.
-  browser_._connection.setMaxListeners(9999);
-
   return browser_;
 }
 
@@ -194,7 +215,7 @@ async function newPage(browser, viewport = null) {
   page.setDefaultNavigationTimeout(0);
   await page.setJavaScriptEnabled(true);
   await page.setRequestInterception(true);
-  page.on('request', interceptedRequest => {
+  page.on('request', (interceptedRequest) => {
     const requestUrl = new URL(interceptedRequest.url());
     const mockedFilepath = path.join(
       path.dirname(__filename),
@@ -304,12 +325,10 @@ function logTestError(testError) {
 /**
  * Runs the visual tests.
  *
- * @param {!Array<string>} assetGlobs an array of glob strings to load assets
- *     from.
  * @param {!Array<JsonObject>} webpages an array of JSON objects containing
  *     details about the pages to snapshot.
  */
-async function runVisualTests(assetGlobs, webpages) {
+async function runVisualTests(webpages) {
   // Create a Percy client and start a build.
   if (process.env['PERCY_TARGET_COMMIT']) {
     log(
@@ -332,7 +351,7 @@ async function runVisualTests(assetGlobs, webpages) {
  */
 async function generateSnapshots(webpages) {
   const numUnfilteredPages = webpages.length;
-  webpages = webpages.filter(webpage => !webpage.flaky);
+  webpages = webpages.filter((webpage) => !webpage.flaky);
   if (numUnfilteredPages != webpages.length) {
     log(
       'info',
@@ -342,7 +361,7 @@ async function generateSnapshots(webpages) {
     );
   }
   if (argv.grep) {
-    webpages = webpages.filter(webpage => argv.grep.test(webpage.name));
+    webpages = webpages.filter((webpage) => argv.grep.test(webpage.name));
     log(
       'info',
       colors.cyan(`--grep ${argv.grep}`),
@@ -449,7 +468,7 @@ async function snapshotWebpages(browser, webpages) {
       await resetPage(page, viewport);
 
       const consoleMessages = [];
-      const consoleLogger = consoleMessage => {
+      const consoleLogger = (consoleMessage) => {
         consoleMessages.push(consoleMessage);
       };
       page.on('console', consoleLogger);
@@ -465,45 +484,44 @@ async function snapshotWebpages(browser, webpages) {
       // since Puppeteer doesn't always understand Chrome's network activity, so
       // ignore timeouts again.
       const pagePromise = (async () => {
-        const responseWatcher = new Promise((resolve, reject) => {
-          const responseTimeout = setTimeout(() => {
-            reject(
-              new puppeteer.TimeoutError(
-                `Response was not received in test ${testName} for page ` +
-                  `${webpage.url} after ${NAVIGATE_TIMEOUT_MS}ms`
-              )
-            );
-          }, NAVIGATE_TIMEOUT_MS);
+        try {
+          const responseWatcher = new Promise((resolve, reject) => {
+            const responseTimeout = setTimeout(() => {
+              reject(
+                new puppeteer.TimeoutError(
+                  `Response was not received in test ${testName} for page ` +
+                    `${webpage.url} after ${NAVIGATE_TIMEOUT_MS}ms`
+                )
+              );
+            }, NAVIGATE_TIMEOUT_MS);
 
-          page.once('response', async response => {
-            log(
-              'verbose',
-              'Response for url',
-              colors.yellow(response.url()),
-              'with status',
-              colors.cyan(response.status()),
-              colors.cyan(response.statusText())
-            );
-            clearTimeout(responseTimeout);
-            resolve();
+            page.once('response', (response) => {
+              log(
+                'verbose',
+                'Response for url',
+                colors.yellow(response.url()),
+                'with status',
+                colors.cyan(response.status()),
+                colors.cyan(response.statusText())
+              );
+              clearTimeout(responseTimeout);
+              resolve();
+            });
           });
-        });
 
-        log('verbose', 'Navigating to page', colors.yellow(webpage.url));
-        await Promise.all([
-          responseWatcher,
-          page.goto(fullUrl, {waitUntil: 'networkidle2'}),
-        ]);
-      })()
-        .then(() => {
+          log('verbose', 'Navigating to page', colors.yellow(webpage.url));
+          await Promise.all([
+            responseWatcher,
+            page.goto(fullUrl, {waitUntil: 'networkidle2'}),
+          ]);
+
           log(
             'verbose',
             'Page navigation of test',
             colors.yellow(name),
             'is done, verifying page'
           );
-        })
-        .catch(navigationError => {
+        } catch (navigationError) {
           hasWarnings = true;
           addTestError(
             testErrors,
@@ -513,77 +531,77 @@ async function snapshotWebpages(browser, webpages) {
             navigationError,
             consoleMessages
           );
-          if (!isTravisBuild()) {
-            log('warning', 'Continuing to verify page regardless...');
-          }
-        })
-        .then(async () => {
-          // Perform visibility checks: wait for all AMP built-in loader dots
-          // to disappear (i.e., all visible components are finished being
-          // layed out and external resources such as images are loaded and
-          // displayed), then, depending on the test configurations, wait for
-          // invisibility/visibility of specific elements that match the
-          // configured CSS selectors.
-          await waitForLoaderDots(page, name);
-          if (webpage.loading_incomplete_selectors) {
-            await verifySelectorsInvisible(
-              page,
-              name,
-              webpage.loading_incomplete_selectors
-            );
-          }
-          if (webpage.loading_complete_selectors) {
-            await verifySelectorsVisible(
-              page,
-              name,
-              webpage.loading_complete_selectors
-            );
-          }
+          log('warning', 'Continuing to verify page regardless...');
+        }
 
-          // Based on test configuration, wait for a specific amount of time.
-          if (webpage.loading_complete_delay_ms) {
-            log(
-              'verbose',
-              'Waiting',
-              colors.cyan(`${webpage.loading_complete_delay_ms}ms`),
-              'for loading to complete'
-            );
-            await sleep(webpage.loading_complete_delay_ms);
-          }
+        // Perform visibility checks: wait for all AMP built-in loader dots
+        // to disappear (i.e., all visible components are finished being
+        // layed out and external resources such as images are loaded and
+        // displayed), then, depending on the test configurations, wait for
+        // invisibility/visibility of specific elements that match the
+        // configured CSS selectors.
+        await waitForPageLoad(page, name);
+        if (webpage.loading_incomplete_selectors) {
+          await verifySelectorsInvisible(
+            page,
+            name,
+            webpage.loading_incomplete_selectors
+          );
+        }
+        if (webpage.loading_complete_selectors) {
+          await verifySelectorsVisible(
+            page,
+            name,
+            webpage.loading_complete_selectors
+          );
+        }
 
-          // Run any other custom code located in the test's interactive_tests
-          // file. If there is no interactive test, this defaults to an empty
-          // function.
-          await testFunction(page, name);
+        // Based on test configuration, wait for a specific amount of time.
+        if (webpage.loading_complete_delay_ms) {
+          log(
+            'verbose',
+            'Waiting',
+            colors.cyan(`${webpage.loading_complete_delay_ms}ms`),
+            'for loading to complete'
+          );
+          await sleep(webpage.loading_complete_delay_ms);
+        }
 
-          // Execute post-scripts that clean up the page's HTML and send
-          // prepare it for snapshotting on Percy. See comments inside the
-          // snippet files for description of each.
-          await page.evaluate(REMOVE_AMP_SCRIPTS_SNIPPET);
-          await page.evaluate(FREEZE_FORM_VALUE_SNIPPET);
+        // Run any other custom code located in the test's interactive_tests
+        // file. If there is no interactive test, this defaults to an empty
+        // function.
+        await testFunction(page, name);
 
-          // Create a default set of snapshot options for Percy and modify
-          // them based on the test's configuration.
-          const snapshotOptions = {...DEFAULT_SNAPSHOT_OPTIONS};
-          if (webpage.enable_percy_javascript) {
-            snapshotOptions.enableJavaScript = true;
-          }
+        // Execute post-scripts that clean up the page's HTML and send
+        // prepare it for snapshotting on Percy. See comments inside the
+        // snippet files for description of each.
+        await page.evaluate(REMOVE_AMP_SCRIPTS_SNIPPET);
+        await page.evaluate(FREEZE_FORM_VALUE_SNIPPET);
+        await page.evaluate(FREEZE_CANVAS_IMAGE_SNIPPET);
 
-          if (viewport) {
-            snapshotOptions.widths = [viewport.width];
-            log('verbose', 'Wrapping viewport-constrained page in an iframe');
-            await page.evaluate(
-              WRAP_IN_IFRAME_SNIPPET.replace(
-                /__WIDTH__/g,
-                viewport.width
-              ).replace(/__HEIGHT__/g, viewport.height)
-            );
-          }
+        // Create a default set of snapshot options for Percy and modify
+        // them based on the test's configuration.
+        const snapshotOptions = {};
+        if (webpage.enable_percy_javascript) {
+          snapshotOptions.enableJavaScript = true;
+        }
 
+        if (viewport) {
+          snapshotOptions.widths = [viewport.width];
+          log('verbose', 'Wrapping viewport-constrained page in an iframe');
+          await page.evaluate(
+            WRAP_IN_IFRAME_SNIPPET.replace(/__WIDTH__/g, viewport.width)
+              .replace(/__HEIGHT__/g, viewport.height)
+              .replace(/__PERCY_CSS__/g, percyCss)
+          );
+        } else {
+          snapshotOptions.percyCss = percyCss;
+        }
+
+        try {
           // Finally, send the snapshot to percy.
           await percySnapshot(page, name, snapshotOptions);
-        })
-        .catch(async testError => {
+        } catch (testError) {
           addTestError(
             testErrors,
             name,
@@ -604,17 +622,17 @@ async function snapshotWebpages(browser, webpages) {
               .replace('__HTML_SNAPSHOT__', escapeHtml(htmlSnapshot))
           );
           await percySnapshot(page, name, SNAPSHOT_SINGLE_BUILD_OPTIONS);
-        })
-        .finally(async () => {
-          log(
-            hasWarnings ? 'warning' : 'info',
-            'Finished test',
-            colors.yellow(name),
-            hasWarnings ? 'with warnings' : ''
-          );
-          page.removeListener('console', consoleLogger);
-          availablePages.push(page);
-        });
+        }
+
+        log(
+          hasWarnings ? 'warning' : 'info',
+          'Finished test',
+          colors.yellow(name),
+          hasWarnings ? 'with warnings' : ''
+        );
+        page.removeListener('console', consoleLogger);
+        availablePages.push(page);
+      })();
       pagePromises.push(pagePromise);
     }
   }
@@ -658,12 +676,14 @@ async function createEmptyBuild() {
   const browser = await launchBrowser();
   const page = await newPage(browser);
 
-  await page
-    .goto(`http://${HOST}:${PORT}/examples/visual-tests/blank-page/blank.html`)
-    .then(
-      () => {},
-      () => {}
+  try {
+    await page.goto(
+      `http://${HOST}:${PORT}/examples/visual-tests/blank-page/blank.html`
     );
+  } catch {
+    // Ignore failures
+  }
+
   await percySnapshot(page, 'Blank page', SNAPSHOT_SINGLE_BUILD_OPTIONS);
 }
 
@@ -673,7 +693,7 @@ async function createEmptyBuild() {
  */
 async function visualDiff() {
   const handlerProcess = createCtrlcHandler('visual-diff');
-  ensureOrBuildAmpRuntimeInTestMode_();
+  await ensureOrBuildAmpRuntimeInTestMode_();
   installPercy_();
   setupCleanup_();
   maybeOverridePercyEnvironmentVariables();
@@ -726,10 +746,7 @@ async function performVisualTests() {
         'utf8'
       )
     );
-    await runVisualTests(
-      visualTestsConfig.asset_globs,
-      visualTestsConfig.webpages
-    );
+    await runVisualTests(visualTestsConfig.webpages);
   }
 }
 
@@ -753,17 +770,13 @@ async function ensureOrBuildAmpRuntimeInTestMode_() {
       );
     }
   } else {
-    execOrDie('gulp clean');
-    execOrDie(`gulp dist --fortesting --config ${argv.config}`);
+    await buildRuntime(/* opt_compiled */ true);
   }
 }
 
 function installPercy_() {
-  if (!argv.noyarn) {
-    log('info', 'Running', colors.cyan('yarn'), 'to install Percy...');
-    execOrDie('npx yarn --cwd build-system/tasks/visual-diff', {
-      'stdio': 'ignore',
-    });
+  if (!argv.noinstall) {
+    installPackages(__dirname);
   }
 
   puppeteer = require('puppeteer');
@@ -780,7 +793,7 @@ function setupCleanup_() {
 async function exitPercyAgent_() {
   if (percyAgentProcess_ && !percyAgentProcess_.killed) {
     let resolver;
-    const percyAgentExited_ = new Promise(resolverIn => {
+    const percyAgentExited_ = new Promise((resolverIn) => {
       resolver = resolverIn;
     });
     percyAgentProcess_.on('exit', () => {
@@ -796,7 +809,7 @@ async function cleanup_() {
   if (browser_) {
     await browser_.close();
   }
-  stopServer();
+  await stopServer();
   await exitPercyAgent_();
 }
 
@@ -821,5 +834,5 @@ visualDiff.flags = {
   'percy_disabled':
     '  Disables Percy integration (for testing local changes only)',
   'nobuild': '  Skip build',
-  'noyarn': '  Skip calling yarn to install dependencies',
+  'noinstall': '  Skip installing npm dependencies',
 };

@@ -31,16 +31,15 @@ const {
 } = require('./utils');
 const {determineBuildTargets} = require('./build-targets');
 const {isTravisPullRequestBuild} = require('../common/travis');
-const {runYarnChecks} = require('./yarn-checks');
+const {runNpmChecks} = require('./npm-checks');
 
 const FILENAME = 'validator-tests.js';
 const FILELOGPREFIX = colors.bold(colors.yellow(`${FILENAME}:`));
-const timedExecOrDie = (cmd, unusedFileName) =>
-  timedExecOrDieBase(cmd, FILENAME);
+const timedExecOrDie = (cmd) => timedExecOrDieBase(cmd, FILENAME);
 
 function main() {
   const startTime = startTimer(FILENAME, FILENAME);
-  if (!runYarnChecks(FILENAME)) {
+  if (!runNpmChecks(FILENAME)) {
     stopTimedJob(FILENAME, startTime);
     return;
   }
@@ -54,7 +53,8 @@ function main() {
     if (
       !buildTargets.has('RUNTIME') &&
       !buildTargets.has('VALIDATOR') &&
-      !buildTargets.has('VALIDATOR_WEBUI')
+      !buildTargets.has('VALIDATOR_WEBUI') &&
+      !buildTargets.has('VALIDATOR_JAVA')
     ) {
       console.log(
         `${FILELOGPREFIX} Skipping`,

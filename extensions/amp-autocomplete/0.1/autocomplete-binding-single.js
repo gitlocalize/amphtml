@@ -1,5 +1,3 @@
-import {userAssert} from '../../../src/log';
-
 /**
  * Copyright 2019 The AMP HTML Authors. All Rights Reserved.
  *
@@ -16,11 +14,13 @@ import {userAssert} from '../../../src/log';
  * limitations under the License.
  */
 
+import {user} from '../../../src/log';
+
 /**
  * Single implementation of autocomplete. This supports autocompleting
  * a single input value in its entirety.
  * @implements {./autocomplete-binding-def.AutocompleteBindingDef}
- * @private
+ * @package
  */
 export class AutocompleteBindingSingle {
   /**
@@ -28,9 +28,6 @@ export class AutocompleteBindingSingle {
    */
   constructor(ampElement) {
     const {element} = ampElement;
-    /** @private {!Element} */
-    this.element_ = element;
-
     /**
      * The Single implementation of autocomplete should highlight
      * the diff between the user input and the active suggestion
@@ -40,13 +37,13 @@ export class AutocompleteBindingSingle {
      */
     this.shouldSuggestFirst_ = element.hasAttribute('suggest-first');
     const filter = element.getAttribute('filter');
-    userAssert(
-      !this.shouldSuggestFirst_ || filter === 'prefix',
-      '"suggest-first" requires "filter" type "prefix". ' +
-        ' Unexpected "filter" type: %s, %s',
-      filter,
-      this.element_
-    );
+    if (this.shouldSuggestFirst_ && filter !== 'prefix') {
+      this.shouldSuggestFirst_ = false;
+      user().warn(
+        'AMP-AUTOCOMPLETE',
+        '"suggest-first" expected "filter" type "prefix".'
+      );
+    }
 
     /**
      * The Single implementation of autocomplete will allow form
@@ -141,7 +138,7 @@ export class AutocompleteBindingSingle {
    * @param {boolean} unusedActiveElement
    * @return {boolean}
    */
-  shouldPreventFormSubmissionOnEnter(unusedActiveElement) {
+  shouldPreventDefaultOnEnter(unusedActiveElement) {
     return !this.submitOnEnter_;
   }
 }

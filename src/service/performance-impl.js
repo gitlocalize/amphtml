@@ -14,10 +14,12 @@
  * limitations under the License.
  */
 
-import {Deferred} from '../utils/promise';
 import {Services} from '../services';
+import {Signals} from '../utils/signals';
+import {TickLabel} from '../enums';
 import {VisibilityState} from '../visibility-state';
-import {dev} from '../log';
+import {createCustomEvent} from '../event-helper';
+import {dev, devAssert} from '../log';
 import {dict, map} from '../utils/object';
 import {getMode} from '../mode';
 import {getService, registerServiceBuilder} from '../service';
@@ -37,6 +39,8 @@ const QUEUE_LIMIT = 50;
 /** @const {string} */
 const VISIBILITY_CHANGE_EVENT = 'visibilitychange';
 
+const TAG = 'Performance';
+
 /**
  * Fields:
  * {{
@@ -47,23 +51,6 @@ const VISIBILITY_CHANGE_EVENT = 'visibilitychange';
  * @typedef {!JsonObject}
  */
 let TickEventDef;
-
-/**
- * Increments the value, else defaults to 0 for the given object key.
- * @param {!Object<string, (string|number|boolean|Array|Object|null)>} obj
- * @param {?string} name
- */
-function incOrDef(obj, name) {
-  if (!name) {
-    return;
-  }
-
-  if (!obj[name]) {
-    obj[name] = 1;
-  } else {
-    obj[name]++;
-  }
-}
 
 /**
  * Performance holds the mechanism to call `tick` to stamp out important
@@ -78,11 +65,12 @@ export class Performance {
     /** @const {!Window} */
     this.win = win;
 
-    /** @private @const {number} */
-    this.initTime_ = this.win.Date.now();
-
     /** @const @private {!Array<TickEventDef>} */
     this.events_ = [];
+
+    /** @const @private {number} */
+    this.timeOrigin_ =
+      win.performance.timeOrigin || win.performance.timing.navigationStart;
 
     /** @private {?./ampdoc-impl.AmpDoc} */
     this.ampdoc_ = null;
@@ -93,6 +81,9 @@ export class Performance {
     /** @private {?./resources-interface.ResourcesInterface} */
     this.resources_ = null;
 
+    /** @private {?./document-info-impl.DocumentInfoDef} */
+    this.documentInfo_ = null;
+
     /** @private {boolean} */
     this.isMessagingReady_ = false;
 
@@ -101,29 +92,12 @@ export class Performance {
 
     /** @private {!Object<string,boolean>} */
     this.enabledExperiments_ = map();
-    /** @private {string} */
-    this.ampexp_ = '';
 
-    this.fcpDeferred_ = new Deferred();
-    this.fvrDeferred_ = new Deferred();
-    this.mbvDeferred_ = new Deferred();
+    /** @private {string|undefined} */
+    this.ampexp_ = undefined;
 
-    // Platform service must be installed before performance serivce is
-    this.platform_ = Services.platformFor(this.win);
-
-    // TODO (micajuineho) change this once all platforms
-    // support PerformancePaintTiming
-    // https://developer.mozilla.org/en-US/docs/Web/API/PerformancePaintTiming
-    if (!this.platform_.isChrome() && !this.platform_.isOpera()) {
-      this.fcpDeferred_.resolve(null);
-    }
-
-    /**
-     * How many times a layout jank metric has been ticked.
-     *
-     * @private {number}
-     */
-    this.jankScoresTicked_ = 0;
+    /** @private {Signals} */
+    this.metrics_ = new Signals();
 
     /**
      * How many times a layout shift metric has been ticked.
@@ -133,14 +107,6 @@ export class Performance {
     this.shiftScoresTicked_ = 0;
 
     /**
-     * The sum of all layout jank fractions triggered on the page from the
-     * Layout Jank API.
-     *
-     * @private {number}
-     */
-    this.aggregateJankScore_ = 0;
-
-    /**
      * The sum of all layout shift fractions triggered on the page from the
      * Layout Instability API.
      *
@@ -148,66 +114,71 @@ export class Performance {
      */
     this.aggregateShiftScore_ = 0;
 
-    /**
-     * Whether the user agent supports the Layout Instability API that shipped
-     * with Chrome 76.
-     *
-     * @private {boolean}
-     */
-    this.supportsLayoutInstabilityAPIv76_ = false;
+    const supportedEntryTypes =
+      (this.win.PerformanceObserver &&
+        this.win.PerformanceObserver.supportedEntryTypes) ||
+      [];
+
+    // If Paint Timing API is not supported, cannot determine first contentful paint
+    if (!supportedEntryTypes.includes('paint')) {
+      this.metrics_.rejectSignal(
+        TickLabel.FIRST_CONTENTFUL_PAINT,
+        dev().createExpectedError('First Contentful Paint not supported')
+      );
+    }
 
     /**
      * Whether the user agent supports the Layout Instability API that shipped
-     * with Chrome 77.
+     * with Chromium 77.
      *
      * @private {boolean}
      */
-    this.supportsLayoutInstabilityAPIv77_ = false;
+    this.supportsLayoutShift_ = supportedEntryTypes.includes('layout-shift');
+
+    if (!this.supportsLayoutShift_) {
+      this.metrics_.rejectSignal(
+        TickLabel.CUMULATIVE_LAYOUT_SHIFT,
+        dev().createExpectedError('Cumulative Layout Shift not supported')
+      );
+    }
 
     /**
      * Whether the user agent supports the Event Timing API that shipped
-     * with Chrome 76.
+     * with Chromium 77.
      *
      * @private {boolean}
      */
-    this.supportsEventTimingAPIv76_ = false;
+    this.supportsEventTiming_ = supportedEntryTypes.includes('first-input');
 
-    /**
-     * Whether the user agent supports the Event Timing API that shipped
-     * with Chrome 77.
-     *
-     * @private {boolean}
-     */
-    this.supportsEventTimingAPIv77_ = false;
+    if (!this.supportsEventTiming_) {
+      this.metrics_.rejectSignal(
+        TickLabel.FIRST_INPUT_DELAY,
+        dev().createExpectedError('First Input Delay not supported')
+      );
+    }
 
     /**
      * Whether the user agent supports the Largest Contentful Paint metric.
      *
      * @private {boolean}
      */
-    this.supportsLargestContentfulPaint_ = false;
+    this.supportsLargestContentfulPaint_ = supportedEntryTypes.includes(
+      'largest-contentful-paint'
+    );
 
-    const {PerformanceObserver} = this.win;
-    if (PerformanceObserver) {
-      const {supportedEntryTypes} = PerformanceObserver;
-      if (supportedEntryTypes) {
-        this.supportsLayoutInstabilityAPIv76_ = this.win.PerformanceObserver.supportedEntryTypes.includes(
-          'layoutShift'
-        );
-        this.supportsLayoutInstabilityAPIv77_ = this.win.PerformanceObserver.supportedEntryTypes.includes(
-          'layout-shift'
-        );
-        this.supportsEventTimingAPIv76_ = this.win.PerformanceObserver.supportedEntryTypes.includes(
-          'firstInput'
-        );
-        this.supportsEventTimingAPIv77_ = this.win.PerformanceObserver.supportedEntryTypes.includes(
-          'first-input'
-        );
-        this.supportsLargestContentfulPaint_ = this.win.PerformanceObserver.supportedEntryTypes.includes(
-          'largest-contentful-paint'
-        );
-      }
+    if (!this.supportsLargestContentfulPaint_) {
+      this.metrics_.rejectSignal(
+        TickLabel.LARGEST_CONTENTFUL_PAINT_VISIBLE,
+        dev().createExpectedError('Largest Contentful Paint not supported')
+      );
     }
+
+    /**
+     * Whether the user agent supports the navigation timing API
+     *
+     * @private {boolean}
+     */
+    this.supportsNavigation_ = supportedEntryTypes.includes('navigation');
 
     /**
      * The latest reported largest contentful paint time, where the loadTime
@@ -233,7 +204,7 @@ export class Performance {
 
     // Tick document ready event.
     whenDocumentReady(win.document).then(() => {
-      this.tick('dr');
+      this.tick(TickLabel.DOCUMENT_READY);
       this.flush();
     });
 
@@ -252,6 +223,7 @@ export class Performance {
     this.ampdoc_ = Services.ampdoc(documentElement);
     this.viewer_ = Services.viewerForDoc(documentElement);
     this.resources_ = Services.resourcesForDoc(documentElement);
+    this.documentInfo_ = Services.documentInfoForDoc(this.ampdoc_);
 
     this.isPerformanceTrackingOn_ =
       this.viewer_.isEmbedded() && this.viewer_.getParam('csi') === '1';
@@ -268,15 +240,12 @@ export class Performance {
     const channelPromise = this.viewer_.whenMessagingReady();
 
     this.ampdoc_.whenFirstVisible().then(() => {
-      this.tick('ofv');
+      this.tick(TickLabel.ON_FIRST_VISIBLE);
       this.flush();
     });
 
     const registerVisibilityChangeListener =
-      this.win.PerformanceLayoutJank ||
-      this.supportsLargestContentfulPaint_ ||
-      this.supportsLayoutInstabilityAPIv76_ ||
-      this.supportsLayoutInstabilityAPIv77_;
+      this.supportsLargestContentfulPaint_ || this.supportsLayoutShift_;
     // Register a handler to record metrics when the page enters the hidden
     // lifecycle state.
     if (registerVisibilityChangeListener) {
@@ -300,7 +269,17 @@ export class Performance {
     return channelPromise
       .then(() => {
         // Tick the "messaging ready" signal.
-        this.tickDelta('msr', this.win.Date.now() - this.initTime_);
+        this.tickDelta(TickLabel.MESSAGING_READY, this.win.performance.now());
+
+        // Tick timeOrigin so that epoch time can be calculated by consumers.
+        this.tick(TickLabel.TIME_ORIGIN, undefined, this.timeOrigin_);
+
+        const usqp = this.ampdoc_.getMetaByName('amp-usqp');
+        if (usqp) {
+          usqp.split(',').forEach((exp) => {
+            this.addEnabledExperiment('ssr-' + exp);
+          });
+        }
 
         return this.maybeAddStoryExperimentId_();
       })
@@ -323,7 +302,7 @@ export class Performance {
    */
   maybeAddStoryExperimentId_() {
     const ampdoc = Services.ampdocServiceFor(this.win).getSingleDoc();
-    return isStoryDocument(ampdoc).then(isStory => {
+    return isStoryDocument(ampdoc).then((isStory) => {
       if (isStory) {
         this.addEnabledExperiment('story');
       }
@@ -334,7 +313,7 @@ export class Performance {
    * Callback for onload.
    */
   onload_() {
-    this.tick('ol');
+    this.tick(TickLabel.ON_LOAD);
     this.tickLegacyFirstPaintTime_();
     this.flush();
   }
@@ -345,35 +324,39 @@ export class Performance {
    * See https://github.com/WICG/paint-timing
    */
   registerPerformanceObserver_() {
-    // Chrome doesn't implement the buffered flag for PerformanceObserver.
-    // That means we need to read existing entries and maintain state
-    // as to whether we have reported a value yet, since in the future it may
-    // be reported twice.
-    // https://bugs.chromium.org/p/chromium/issues/detail?id=725567
+    // Turn off performanceObserver derived metrics for inabox as there
+    // will never be a viewer to report to.
+    // TODO(ccordry): we are still doing some other unnecessary measurements for
+    // the inabox case, but would need a larger refactor.
+    if (getMode(this.win).runtime === 'inabox') {
+      return;
+    }
+
+    // These state vars ensure that we only report a given value once, because
+    // the backend doesn't support updates.
     let recordedFirstPaint = false;
     let recordedFirstContentfulPaint = false;
     let recordedFirstInputDelay = false;
-    const processEntry = entry => {
+    let recordedNavigation = false;
+    const processEntry = (entry) => {
       if (entry.name == 'first-paint' && !recordedFirstPaint) {
-        this.tickDelta('fp', entry.startTime + entry.duration);
+        this.tickDelta(TickLabel.FIRST_PAINT, entry.startTime + entry.duration);
         recordedFirstPaint = true;
       } else if (
         entry.name == 'first-contentful-paint' &&
         !recordedFirstContentfulPaint
       ) {
-        this.tickDelta('fcp', entry.startTime + entry.duration);
+        const value = entry.startTime + entry.duration;
+        this.tickDelta(TickLabel.FIRST_CONTENTFUL_PAINT, value);
+        this.tickSinceVisible(TickLabel.FIRST_CONTENTFUL_PAINT_VISIBLE, value);
         recordedFirstContentfulPaint = true;
       } else if (
-        (entry.entryType === 'firstInput' ||
-          entry.entryType === 'first-input') &&
+        entry.entryType === 'first-input' &&
         !recordedFirstInputDelay
       ) {
-        this.tickDelta('fid', entry.processingStart - entry.startTime);
+        const value = entry.processingStart - entry.startTime;
+        this.tickDelta(TickLabel.FIRST_INPUT_DELAY, value);
         recordedFirstInputDelay = true;
-      } else if (entry.entryType === 'layoutJank') {
-        this.aggregateJankScore_ += entry.fraction;
-      } else if (entry.entryType === 'layoutShift') {
-        this.aggregateShiftScore_ += entry.value;
       } else if (entry.entryType === 'layout-shift') {
         // Ignore layout shift that occurs within 500ms of user input, as it is
         // likely in response to the user's action.
@@ -387,88 +370,84 @@ export class Performance {
         if (entry.renderTime) {
           this.largestContentfulPaintRenderTime_ = entry.renderTime;
         }
+      } else if (entry.entryType == 'navigation' && !recordedNavigation) {
+        [
+          'domComplete',
+          'domContentLoadedEventEnd',
+          'domContentLoadedEventStart',
+          'domInteractive',
+          'loadEventEnd',
+          'loadEventStart',
+          'requestStart',
+          'responseStart',
+        ].forEach((label) => this.tick(label, entry[label]));
+        recordedNavigation = true;
       }
     };
 
     const entryTypesToObserve = [];
     if (this.win.PerformancePaintTiming) {
       // Programmatically read once as currently PerformanceObserver does not
-      // report past entries as of Chrome 61.
+      // report past entries as of Chromium 61.
       // https://bugs.chromium.org/p/chromium/issues/detail?id=725567
       this.win.performance.getEntriesByType('paint').forEach(processEntry);
       entryTypesToObserve.push('paint');
     }
 
-    if (this.supportsEventTimingAPIv76_) {
-      // Programmatically read once as currently PerformanceObserver does not
-      // report past entries as of Chrome 61.
-      // https://bugs.chromium.org/p/chromium/issues/detail?id=725567
-      this.win.performance.getEntriesByType('firstInput').forEach(processEntry);
-      entryTypesToObserve.push('firstInput');
+    if (this.supportsEventTiming_) {
+      this.createPerformanceObserver_(processEntry, {
+        type: 'first-input',
+        buffered: true,
+      });
     }
 
-    if (this.supportsEventTimingAPIv77_) {
-      const firstInputObserver = this.createPerformanceObserver_(processEntry);
-      firstInputObserver.observe({type: 'first-input', buffered: true});
-    }
-
-    if (this.win.PerformanceLayoutJank) {
-      // Programmatically read once as currently PerformanceObserver does not
-      // report past entries as of Chrome 61.
-      // https://bugs.chromium.org/p/chromium/issues/detail?id=725567
-      this.win.performance.getEntriesByType('layoutJank').forEach(processEntry);
-      entryTypesToObserve.push('layoutJank');
-    }
-
-    if (this.supportsLayoutInstabilityAPIv76_) {
-      // Programmatically read once as currently PerformanceObserver does not
-      // report past entries as of Chrome 61.
-      // https://bugs.chromium.org/p/chromium/issues/detail?id=725567
-      this.win.performance
-        .getEntriesByType('layoutShift')
-        .forEach(processEntry);
-      entryTypesToObserve.push('layoutShift');
-    }
-
-    if (this.supportsLayoutInstabilityAPIv77_) {
-      const layoutInstabilityObserver = this.createPerformanceObserver_(
-        processEntry
-      );
-      layoutInstabilityObserver.observe({type: 'layout-shift', buffered: true});
+    if (this.supportsLayoutShift_) {
+      this.createPerformanceObserver_(processEntry, {
+        type: 'layout-shift',
+        buffered: true,
+      });
     }
 
     if (this.supportsLargestContentfulPaint_) {
-      const lcpObserver = this.createPerformanceObserver_(processEntry);
-      lcpObserver.observe({type: 'largest-contentful-paint', buffered: true});
+      // lcpObserver
+      this.createPerformanceObserver_(processEntry, {
+        type: 'largest-contentful-paint',
+        buffered: true,
+      });
     }
 
-    if (entryTypesToObserve.length === 0) {
-      return;
+    if (this.supportsNavigation_) {
+      // Wrap in a try statement as there are some browsers (ex. chrome 73)
+      // that will say it supports navigation but throws.
+      this.createPerformanceObserver_(processEntry, {
+        type: 'navigation',
+        buffered: true,
+      });
     }
 
-    const observer = this.createPerformanceObserver_(processEntry);
-
-    // Wrap observer.observe() in a try statement for testing, because
-    // Webkit throws an error if the entry types to observe are not natively
-    // supported.
-    try {
-      observer.observe({entryTypes: entryTypesToObserve});
-    } catch (err) {
-      dev() /*OK*/
-        .warn(err);
+    if (entryTypesToObserve.length > 0) {
+      this.createPerformanceObserver_(processEntry, {
+        entryTypes: entryTypesToObserve,
+      });
     }
   }
 
   /**
    * @param {function(!PerformanceEntry)} processEntry
+   * @param {!PerformanceObserverInit} init
    * @return {!PerformanceObserver}
    * @private
    */
-  createPerformanceObserver_(processEntry) {
-    return new this.win.PerformanceObserver(list => {
-      list.getEntries().forEach(processEntry);
-      this.flush();
-    });
+  createPerformanceObserver_(processEntry, init) {
+    try {
+      const obs = new this.win.PerformanceObserver((list) => {
+        list.getEntries().forEach(processEntry);
+        this.flush();
+      });
+      obs.observe(init);
+    } catch (err) {
+      dev().warn(TAG, err);
+    }
   }
 
   /**
@@ -479,84 +458,44 @@ export class Performance {
     if (!this.win.perfMetrics || !this.win.perfMetrics.onFirstInputDelay) {
       return;
     }
-    this.win.perfMetrics.onFirstInputDelay(delay => {
-      this.tickDelta('fid-polyfill', delay);
+    this.win.perfMetrics.onFirstInputDelay((delay) => {
+      this.tickDelta(TickLabel.FIRST_INPUT_DELAY_POLYFILL, delay);
       this.flush();
     });
   }
 
   /**
    * When the visibility state of the document changes to hidden,
-   * send the layout jank score.
+   * send the layout scores.
    * @private
    */
   onVisibilityChange_() {
     if (this.win.document.visibilityState === 'hidden') {
-      if (this.win.PerformanceLayoutJank) {
-        this.tickLayoutJankScore_();
-      }
-      if (
-        this.supportsLayoutInstabilityAPIv76_ ||
-        this.supportsLayoutInstabilityAPIv77_
-      ) {
-        this.tickLayoutShiftScore_();
-      }
-      if (this.supportsLargestContentfulPaint_) {
-        this.tickLargestContentfulPaint_();
-      }
+      this.tickCumulativeMetrics_();
     }
   }
 
   /**
    * When the viewer visibility state of the document changes to inactive,
-   * send the layout jank score.
+   * send the layout score.
    * @private
    */
   onAmpDocVisibilityChange_() {
     if (this.ampdoc_.getVisibilityState() === VisibilityState.INACTIVE) {
-      if (this.win.PerformanceLayoutJank) {
-        this.tickLayoutJankScore_();
-      }
-      if (
-        this.supportsLayoutInstabilityAPIv76_ ||
-        this.supportsLayoutInstabilityAPIv77_
-      ) {
-        this.tickLayoutShiftScore_();
-      }
-      if (this.supportsLargestContentfulPaint_) {
-        this.tickLargestContentfulPaint_();
-      }
+      this.tickCumulativeMetrics_();
     }
   }
 
   /**
-   * Tick the layout jank score metric.
-   *
-   * A value of the metric is recorded in under two names, `lj` and `lj-2`,
-   * for the first two times the page transitions into a hidden lifecycle state
-   * (when the page is navigated a way from, the tab is backgrounded for
-   * another tab, or the user backgrounds the browser application).
-   *
-   * Since we can't reliably detect when a page session finally ends,
-   * recording the value for these first two events should provide a fair
-   * amount of visibility into this metric.
+   * Tick the metrics whose values change over time.
+   * @private
    */
-  tickLayoutJankScore_() {
-    if (this.jankScoresTicked_ === 0) {
-      this.tickDelta('lj', this.aggregateJankScore_);
-      this.flush();
-      this.jankScoresTicked_ = 1;
-    } else if (this.jankScoresTicked_ === 1) {
-      this.tickDelta('lj-2', this.aggregateJankScore_);
-      this.flush();
-      this.jankScoresTicked_ = 2;
-
-      // No more work to do, so clean up event listeners.
-      this.win.removeEventListener(
-        VISIBILITY_CHANGE_EVENT,
-        this.boundOnVisibilityChange_,
-        {capture: true}
-      );
+  tickCumulativeMetrics_() {
+    if (this.supportsLayoutShift_) {
+      this.tickLayoutShiftScore_();
+    }
+    if (this.supportsLargestContentfulPaint_) {
+      this.tickLargestContentfulPaint_();
     }
   }
 
@@ -574,11 +513,17 @@ export class Performance {
    */
   tickLayoutShiftScore_() {
     if (this.shiftScoresTicked_ === 0) {
-      this.tickDelta('cls', this.aggregateShiftScore_);
+      this.tickDelta(
+        TickLabel.CUMULATIVE_LAYOUT_SHIFT,
+        this.aggregateShiftScore_
+      );
       this.flush();
       this.shiftScoresTicked_ = 1;
     } else if (this.shiftScoresTicked_ === 1) {
-      this.tickDelta('cls-2', this.aggregateShiftScore_);
+      this.tickDelta(
+        TickLabel.CUMULATIVE_LAYOUT_SHIFT_2,
+        this.aggregateShiftScore_
+      );
       this.flush();
       this.shiftScoresTicked_ = 2;
 
@@ -592,13 +537,13 @@ export class Performance {
   }
 
   /**
-   * Tick fp time based on Chrome's legacy paint timing API when
+   * Tick fp time based on Chromium's legacy paint timing API when
    * appropriate.
    * `registerPaintTimingObserver_` calls the standards based API and this
    * method does nothing if it is available.
    */
   tickLegacyFirstPaintTime_() {
-    // Detect deprecated first pain time API
+    // Detect deprecated first paint time API
     // https://bugs.chromium.org/p/chromium/issues/detail?id=621512
     // We'll use this until something better is available.
     if (
@@ -610,11 +555,11 @@ export class Performance {
         this.win.chrome.loadTimes()['firstPaintTime'] * 1000 -
         this.win.performance.timing.navigationStart;
       if (fpTime <= 1) {
-        // Throw away bad data generated from an apparent Chrome bug
-        // that is fixed in later Chrome versions.
+        // Throw away bad data generated from an apparent Chromium bug
+        // that is fixed in later Chromium versions.
         return;
       }
-      this.tickDelta('fp', fpTime);
+      this.tickDelta(TickLabel.FIRST_PAINT, fpTime);
     }
   }
 
@@ -622,11 +567,23 @@ export class Performance {
    * Tick the largest contentful paint metrics.
    */
   tickLargestContentfulPaint_() {
+    /** @type {number|null} */ let end;
     if (this.largestContentfulPaintLoadTime_ !== null) {
-      this.tickDelta('lcpl', this.largestContentfulPaintLoadTime_);
+      this.tickDelta(
+        TickLabel.LARGEST_CONTENTFUL_PAINT_LOAD,
+        this.largestContentfulPaintLoadTime_
+      );
+      end = this.largestContentfulPaintLoadTime_;
     }
     if (this.largestContentfulPaintRenderTime_ !== null) {
-      this.tickDelta('lcpr', this.largestContentfulPaintRenderTime_);
+      this.tickDelta(
+        TickLabel.LARGEST_CONTENTFUL_PAINT_RENDER,
+        this.largestContentfulPaintRenderTime_
+      );
+      end = end || this.largestContentfulPaintRenderTime_;
+    }
+    if (end !== null) {
+      this.tickSinceVisible(TickLabel.LARGEST_CONTENTFUL_PAINT_VISIBLE, end);
     }
     this.flush();
   }
@@ -638,12 +595,10 @@ export class Performance {
    */
   measureUserPerceivedVisualCompletenessTime_() {
     const didStartInPrerender = !this.ampdoc_.hasBeenVisible();
-    let docVisibleTime = didStartInPrerender ? -1 : this.initTime_;
 
-    // This will only be relevant if the ampdoc is in prerender mode.
-    // (hasn't been visible yet, ever at this point)
+    let docVisibleTime = -1;
     this.ampdoc_.whenFirstVisible().then(() => {
-      docVisibleTime = this.win.Date.now();
+      docVisibleTime = this.win.performance.now();
       // Mark this first visible instance in the browser timeline.
       this.mark('visible');
     });
@@ -652,7 +607,7 @@ export class Performance {
       if (didStartInPrerender) {
         const userPerceivedVisualCompletenesssTime =
           docVisibleTime > -1
-            ? this.win.Date.now() - docVisibleTime
+            ? this.win.performance.now() - docVisibleTime
             : //  Prerender was complete before visibility.
               0;
         this.ampdoc_.whenFirstVisible().then(() => {
@@ -660,19 +615,20 @@ export class Performance {
           // since otherwise we heavily skew the metric towards the
           // 0 case, since pre-renders that are never used are highly
           // likely to fully load before they are never used :)
-          this.tickDelta('pc', userPerceivedVisualCompletenesssTime);
+          this.tickDelta(
+            TickLabel.FIRST_VIEWPORT_READY,
+            userPerceivedVisualCompletenesssTime
+          );
         });
         this.prerenderComplete_(userPerceivedVisualCompletenesssTime);
         // Mark this instance in the browser timeline.
-        this.mark('pc');
+        this.mark(TickLabel.FIRST_VIEWPORT_READY);
       } else {
         // If it didnt start in prerender, no need to calculate anything
         // and we just need to tick `pc`. (it will give us the relative
         // time since the viewer initialized the timer)
-        this.tick('pc');
-        // We don't have the actual csi timer's clock start time,
-        // so we just have to use `docVisibleTime`.
-        this.prerenderComplete_(this.win.Date.now() - docVisibleTime);
+        this.tick(TickLabel.FIRST_VIEWPORT_READY);
+        this.prerenderComplete_(this.win.performance.now() - docVisibleTime);
       }
       this.flush();
     });
@@ -685,10 +641,10 @@ export class Performance {
    * @private
    */
   whenViewportLayoutComplete_() {
-    const {documentElement} = this.win.document;
-    const size = Services.viewportForDoc(documentElement).getSize();
-    const rect = layoutRectLtwh(0, 0, size.width, size.height);
     return this.resources_.whenFirstPass().then(() => {
+      const {documentElement} = this.win.document;
+      const size = Services.viewportForDoc(documentElement).getSize();
+      const rect = layoutRectLtwh(0, 0, size.width, size.height);
       return whenContentIniLoad(
         documentElement,
         this.win,
@@ -701,48 +657,49 @@ export class Performance {
   /**
    * Ticks a timing event.
    *
-   * @param {string} label The variable name as it will be reported.
+   * @param {TickLabel} label The variable name as it will be reported.
    *     See TICKEVENTS.md for available metrics, and edit this file
    *     when adding a new metric.
    * @param {number=} opt_delta The delta. Call tickDelta instead of setting
    *     this directly.
+   * @param {number=} opt_value The value to use. Overrides default calculation.
    */
-  tick(label, opt_delta) {
-    const value = opt_delta == undefined ? this.win.Date.now() : undefined;
+  tick(label, opt_delta, opt_value) {
+    devAssert(
+      opt_delta == undefined || opt_value == undefined,
+      'You may not set both opt_delta and opt_value.'
+    );
 
-    const data = dict({
-      'label': label,
-      'value': value,
-      // Delta can negative, but will always be changed to 0.
-      'delta': opt_delta != null ? Math.max(opt_delta, 0) : undefined,
-    });
+    const data = dict({'label': label});
+    let delta;
+
+    if (opt_delta != undefined) {
+      data['delta'] = delta = Math.max(opt_delta, 0);
+    } else if (opt_value != undefined) {
+      data['value'] = opt_value;
+    } else {
+      // Marking only makes sense for non-overridden values (and no deltas).
+      this.mark(label);
+      delta = this.win.performance.now();
+      data['value'] = this.timeOrigin_ + delta;
+    }
+
+    // Emit events. Used by `gulp performance`.
+    this.win.dispatchEvent(
+      createCustomEvent(
+        this.win,
+        'perf',
+        /** @type {JsonObject} */ ({label, delta})
+      )
+    );
+
     if (this.isMessagingReady_ && this.isPerformanceTrackingOn_) {
       this.viewer_.sendMessage('tick', data);
     } else {
       this.queueTick_(data);
     }
-    // Mark the event on the browser timeline, but only if there was
-    // no delta (in which case it would not make sense).
-    if (arguments.length == 1) {
-      this.mark(label);
-    }
 
-    // Store certain page visibility metrics to be exposed as analytics
-    // variables.
-    const storedVal = Math.round(
-      opt_delta != null ? Math.max(opt_delta, 0) : value - this.initTime_
-    );
-    switch (label) {
-      case 'fcp':
-        this.fcpDeferred_.resolve(storedVal);
-        break;
-      case 'pc':
-        this.fvrDeferred_.resolve(storedVal);
-        break;
-      case 'mbv':
-        this.mbvDeferred_.resolve(storedVal);
-        break;
-    }
+    this.metrics_.signal(label, delta);
   }
 
   /**
@@ -764,7 +721,7 @@ export class Performance {
   /**
    * Tick a very specific value for the label. Use this method if you
    * measure the time it took to do something yourself.
-   * @param {string} label The variable name as it will be reported.
+   * @param {TickLabel} label The variable name as it will be reported.
    * @param {number} value The value in milliseconds that should be ticked.
    */
   tickDelta(label, value) {
@@ -773,12 +730,17 @@ export class Performance {
 
   /**
    * Tick time delta since the document has become visible.
-   * @param {string} label The variable name as it will be reported.
+   * @param {TickLabel} label The variable name as it will be reported.
+   * @param {number=} opt_delta The optional delta value in milliseconds.
    */
-  tickSinceVisible(label) {
-    const now = this.win.Date.now();
-    const visibleTime = this.ampdoc_ ? this.ampdoc_.getFirstVisibleTime() : 0;
-    const v = visibleTime ? Math.max(now - visibleTime, 0) : 0;
+  tickSinceVisible(label, opt_delta) {
+    const delta =
+      opt_delta == undefined ? this.win.performance.now() : opt_delta;
+    const end = this.timeOrigin_ + delta;
+
+    // Order is timeOrigin -> firstVisibleTime -> end.
+    const visibleTime = this.ampdoc_ && this.ampdoc_.getFirstVisibleTime();
+    const v = visibleTime ? Math.max(end - visibleTime, 0) : 0;
     this.tickDelta(label, v);
   }
 
@@ -787,10 +749,14 @@ export class Performance {
    */
   flush() {
     if (this.isMessagingReady_ && this.isPerformanceTrackingOn_) {
+      if (this.ampexp_ == null) {
+        this.ampexp_ = Object.keys(this.enabledExperiments_).join(',');
+      }
       this.viewer_.sendMessage(
         'sendCsi',
         dict({
           'ampexp': this.ampexp_,
+          'canonicalUrl': this.documentInfo_.canonicalUrl,
         }),
         /* cancelUnsent */ true
       );
@@ -813,7 +779,7 @@ export class Performance {
    */
   addEnabledExperiment(experimentId) {
     this.enabledExperiments_[experimentId] = true;
-    this.ampexp_ = Object.keys(this.enabledExperiments_).join(',');
+    this.ampexp_ = undefined;
   }
 
   /**
@@ -847,7 +813,7 @@ export class Performance {
       return;
     }
 
-    this.events_.forEach(tickEvent => {
+    this.events_.forEach((tickEvent) => {
       this.viewer_.sendMessage('tick', tickEvent);
     });
     this.events_.length = 0;
@@ -878,24 +844,13 @@ export class Performance {
   }
 
   /**
-   * @return {!Promise<number>}
+   * Retrieve a promise for tick label, resolved with metric. Used by amp-analytics
+   *
+   * @param {TickLabel} label
+   * @return {!Promise<time>}
    */
-  getFirstContentfulPaint() {
-    return this.fcpDeferred_.promise;
-  }
-
-  /**
-   * @return {!Promise<number>}
-   */
-  getMakeBodyVisible() {
-    return this.mbvDeferred_.promise;
-  }
-
-  /**
-   * @return {!Promise<number>}
-   */
-  getFirstViewportReady() {
-    return this.fvrDeferred_.promise;
+  getMetric(label) {
+    return this.metrics_.whenSignal(label);
   }
 }
 

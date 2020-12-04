@@ -1,12 +1,11 @@
 {
-  "experimentA": {},
-  "experimentB": {},
-  "experimentC": {
-    "name": "Native Custom Elements V1",
+  "experimentA": {
+    "name": "A4A No Signing RTV Experiment",
     "environment": "AMP",
-    "command": "gulp dist --defineExperimentConstant=NATIVE_CUSTOM_ELEMENTS_V1",
-    "issue": "https://github.com/ampproject/amphtml/issues/17243",
-    "expirationDateUTC": "2020-01-01",
-    "defineExperimentConstant": "NATIVE_CUSTOM_ELEMENTS_V1"
-  }
+    "issue": "https://github.com/ampproject/amphtml/issues/27189",
+    "expiration_date_utc": "2020-12-30",
+    "define_experiment_constant": "NO_SIGNING_RTV"
+  },
+  "experimentB": {},
+  "experimentC": {}
 }

@@ -19,19 +19,29 @@ To use RTC, you must meet the following requirements:
 
 ### Supported Vendors
 
+- Admax
+- Adpushup
 - AppNexus
+- AppNexus PSP
 - APS
 - Automatad
+- Andbeyond
+- Browsi
 - Criteo
+- FLUX
+- [Freestar](https://freestar.com)
+- Future Plc
 - IndexExchange
+- Kargo
 - Lotame
 - Media.net
 - PubMatic OpenWrap
 - Purch
 - Rubicon
 - Salesforce
+- T13
+- The Ozone Project
 - Yieldbot
-- Kargo
 - Yieldlab
 
 ### Overview

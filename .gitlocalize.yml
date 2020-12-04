@@ -5,3 +5,4 @@ synchronize:
     - "**/*.yaml"
     - "**/*.yml"
     - "**/*.html"
+    - "**/*.json"

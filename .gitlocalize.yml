@@ -1,0 +1,7 @@
+synchronize:
+  paths:
+  - source: .
+    exclude:
+    - "**/*.yaml"
+    - "**/*.yml"
+    - "**/*.html"

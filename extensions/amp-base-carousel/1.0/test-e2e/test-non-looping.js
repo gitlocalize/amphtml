@@ -21,12 +21,11 @@ const pageWidth = 800;
 const pageHeight = 600;
 
 describes.endtoend(
-  'Non-looping AMP carousel',
+  'amp-base-carousel - non-looping',
   {
-    testUrl:
-      'http://localhost:8000/test/manual/amp-base-carousel/1.0/' +
-      'non-looping.amp.html',
-    experiments: ['amp-base-carousel-bento'],
+    version: '1.0',
+    fixture: 'amp-base-carousel/non-looping.amp.html',
+    experiments: ['bento-carousel'],
     environments: ['single', 'viewer-demo'],
     initialRect: {width: pageWidth, height: pageHeight},
   },

@@ -15,12 +15,12 @@
  */
 'use strict';
 
-const colors = require('ansi-colors');
 const gulp = require('gulp');
-const log = require('fancy-log');
 const path = require('path');
 const srcGlobs = require('../test-configs/config').presubmitGlobs;
 const through2 = require('through2');
+const {blue, red} = require('ansi-colors');
+const {log} = require('../common/logging');
 
 const dedicatedCopyrightNoteSources = /(\.js|\.css|\.go)$/;
 
@@ -89,12 +89,6 @@ const forbiddenTerms = {
   '[^.]user\\(\\)\\.assert\\(': 'Use the userAssert function instead.',
   'it\\.only': '',
   'Math.random[^;()]*=': 'Use Sinon to stub!!!',
-  'gulp-util': {
-    message:
-      '`gulp-util` will be deprecated soon. See ' +
-      'https://medium.com/gulpjs/gulp-util-ca3b1f9f9ac5 ' +
-      'for a list of alternatives.',
-  },
   'sinon\\.(spy|stub|mock)\\(': {
     message: 'Use a sandbox instead to avoid repeated `#restore` calls',
   },
@@ -111,37 +105,14 @@ const forbiddenTerms = {
       '  If this is cross domain, overwrite the method directly.',
   },
   'console\\.\\w+\\(': {
-    message:
-      'If you run against this, use console/*OK*/.[log|error] to ' +
-      'allowlist a legit case.',
+    message: String(
+      'console.log is generally forbidden. For the runtime, use ' +
+        'console/*OK*/.[log|error] to allowlist a legit case. ' +
+        'For build-system, use the functions in build-system/common/logging.js.'
+    ),
     allowlist: [
       'build-system/common/check-package-manager.js',
-      'build-system/pr-check/build.js',
-      'build-system/pr-check/build-targets.js',
-      'build-system/pr-check/checks.js',
-      'build-system/pr-check/dist-bundle-size.js',
-      'build-system/pr-check/dist-tests.js',
-      'build-system/pr-check/module-dist-bundle-size.js',
-      'build-system/pr-check/esm-tests.js',
-      'build-system/pr-check/experiment-tests.js',
-      'build-system/pr-check/e2e-tests.js',
-      'build-system/pr-check/local-tests.js',
-      'build-system/pr-check/npm-checks.js',
-      'build-system/pr-check/performance-tests.js',
-      'build-system/pr-check/utils.js',
-      'build-system/pr-check/validator-tests.js',
-      'build-system/pr-check/visual-diff-tests.js',
-      'build-system/server/app.js',
-      'build-system/server/amp4test.js',
-      'build-system/tasks/build.js',
-      'build-system/tasks/check-exact-versions.js',
-      'build-system/tasks/check-owners.js',
-      'build-system/tasks/check-types.js',
-      'build-system/tasks/dist.js',
-      'build-system/tasks/dns-monitor.js',
-      'build-system/tasks/helpers.js',
-      'build-system/tasks/prettify.js',
-      'build-system/tasks/server-tests.js',
+      'build-system/common/logging.js',
       'src/purifier/noop.js',
       'validator/js/engine/parse-css.js',
       'validator/js/engine/validator-in-browser.js',
@@ -340,6 +311,7 @@ const forbiddenTerms = {
       'src/service/cid-impl.js',
       'src/service/origin-experiments-impl.js',
       'src/services.js',
+      'src/utils/display-observer.js',
       'testing/test-helper.js',
     ],
   },
@@ -467,7 +439,7 @@ const forbiddenTerms = {
     message: shouldNeverBeUsed,
     allowlist: ['extension/amp-bind/0.1/test/test-bind-expr.js'],
   },
-  'storageForDoc': {
+  'storageForDoc|storageForTopLevelDoc': {
     message:
       requiresReviewPrivacy +
       ' Please refer to spec/amp-localstorage.md for more information on' +
@@ -617,7 +589,7 @@ const forbiddenTerms = {
   },
   '\\.scheduleLayoutOrPreload\\(': {
     message: 'scheduleLayoutOrPreload is a restricted API.',
-    allowlist: ['src/service/owners-impl.js', 'src/service/resources-impl.js'],
+    allowlist: ['src/custom-element.js', 'src/service/resources-impl.js'],
   },
   '(win|Win)(dow)?(\\(\\))?\\.open\\W': {
     message: 'Use dom.openWindowDialog',
@@ -920,6 +892,10 @@ const bannedTermsHelpString =
   'forbidden property/method or mark it with `object./*REVIEW*/property` ' +
   'if you are unsure and so that it stands out in code reviews.';
 
+const measurementApiDeprecated =
+  'getLayoutSize/Box APIs are being deprecated. Please contact the' +
+  ' @ampproject/wg-performance for questions.';
+
 const forbiddenTermsSrcInclusive = {
   '\\.innerHTML(?!_)': bannedTermsHelpString,
   '\\.outerHTML(?!_)': bannedTermsHelpString,
@@ -1027,6 +1003,7 @@ const forbiddenTermsSrcInclusive = {
       'src/element-stub.js',
       'src/friendly-iframe-embed.js',
       'src/polyfillstub/intersection-observer-stub.js',
+      'src/polyfillstub/resize-observer-stub.js',
       'src/runtime.js',
       'src/service/extensions-impl.js',
       'src/service/lightbox-manager-discovery.js',
@@ -1084,7 +1061,7 @@ const forbiddenTermsSrcInclusive = {
     message: 'Unless you do weird date math (allowlist), use Date.now().',
     allowlist: [
       'extensions/amp-timeago/0.1/amp-timeago.js',
-      'extensions/amp-timeago/1.0/timeago.js',
+      'extensions/amp-timeago/1.0/component.js',
       'src/utils/date.js',
     ],
   },
@@ -1104,6 +1081,7 @@ const forbiddenTermsSrcInclusive = {
       'extensions/amp-analytics/0.1/cookie-writer.js',
       'extensions/amp-analytics/0.1/requests.js',
       'extensions/amp-analytics/0.1/variables.js',
+      'extensions/amp-consent/0.1/cookie-writer.js',
     ],
   },
   '\\.expandInputValueSync\\(': {
@@ -1180,24 +1158,60 @@ const forbiddenTermsSrcInclusive = {
     message: 'Unsupported on IE; use trim() or a helper instead.',
     allowlist: ['validator/js/engine/validator.js'],
   },
-  "process\\.env(\\.TRAVIS|\\[\\'TRAVIS)": {
+  "process\\.env(\\.|\\[\\')(GITHUB_ACTIONS|CIRCLECI)": {
     message:
-      'Do not directly use process.env.TRAVIS. Instead, add a ' +
-      'function to build-system/common/travis.js',
-    allowlist: [
-      'build-system/common/check-package-manager.js',
-      'build-system/common/travis.js',
-    ],
+      'Do not directly use CI-specific environment vars. Instead, add a ' +
+      'function to build-system/common/ci.js',
   },
   '\\.matches\\(': 'Please use matches() helper in src/dom.js',
+  '\\.getLayoutBox': {
+    message: measurementApiDeprecated,
+    allowlist: [
+      'src/base-element.js',
+      'src/custom-element.js',
+      'src/friendly-iframe-embed.js',
+      'src/service/mutator-impl.js',
+      'src/service/resource.js',
+      'src/service/resources-impl.js',
+      'extensions/amp-ad/0.1/amp-ad-3p-impl.js',
+      'extensions/amp-ad-network-adsense-impl/0.1/responsive-state.js',
+      'extensions/amp-fx-flying-carpet/0.1/amp-fx-flying-carpet.js',
+      'extensions/amp-iframe/0.1/amp-iframe.js',
+      'extensions/amp-next-page/1.0/visibility-observer.js',
+      'extensions/amp-playbuzz/0.1/amp-playbuzz.js',
+      'extensions/amp-story/1.0/page-advancement.js',
+    ],
+  },
+  '\\.getIntersectionElementLayoutBox': {
+    message: measurementApiDeprecated,
+    allowlist: [
+      'src/custom-element.js',
+      'extensions/amp-a4a/0.1/amp-a4a.js',
+      'extensions/amp-ad/0.1/amp-ad-3p-impl.js',
+      'extensions/amp-ad-network-adsense-impl/0.1/amp-ad-network-adsense-impl.js',
+      'extensions/amp-ad-network-doubleclick-impl/0.1/amp-ad-network-doubleclick-impl.js',
+      'extensions/amp-iframe/0.1/amp-iframe.js',
+    ],
+  },
+  "require\\('fancy-log'\\)": {
+    message:
+      'Instead of fancy-log, use the logging functions in build-system/common/logging.js.',
+    allowlist: [
+      'build-system/common/logging.js',
+      'build-system/tasks/visual-diff/helpers.js',
+      'validator/js/gulpjs/index.js',
+    ],
+  },
 };
 
 // Terms that must appear in a source file.
 const requiredTerms = {
-  'Copyright 20(15|16|17|18|19|20) The AMP HTML Authors\\.': dedicatedCopyrightNoteSources,
+  'Copyright 20(15|16|17|18|19|2\\d) The AMP HTML Authors\\.': dedicatedCopyrightNoteSources,
   'Licensed under the Apache License, Version 2\\.0': dedicatedCopyrightNoteSources,
   'http\\://www\\.apache\\.org/licenses/LICENSE-2\\.0': dedicatedCopyrightNoteSources,
 };
+// Exclude extension generator templates
+const requiredTermsExcluded = /amp-__component_name_hyphenated__/;
 
 /**
  * Check if root of path is test/ or file is in a folder named test.
@@ -1296,7 +1310,7 @@ function matchTerms(file, terms) {
         }
 
         log(
-          colors.red(
+          red(
             'Found forbidden: "' +
               match[0] +
               '" in ' +
@@ -1315,9 +1329,9 @@ function matchTerms(file, terms) {
 
         // log the possible fix information if provided for the term.
         if (fix) {
-          log(colors.blue(fix));
+          log(blue(fix));
         }
-        log(colors.blue('=========='));
+        log(blue('=========='));
       }
 
       return hasTerm;
@@ -1368,18 +1382,14 @@ function isMissingTerms(file) {
   return Object.keys(requiredTerms)
     .map(function (term) {
       const filter = requiredTerms[term];
-      if (!filter.test(file.path)) {
+      if (!filter.test(file.path) || requiredTermsExcluded.test(file.path)) {
         return false;
       }
 
       const matches = contents.match(new RegExp(term));
       if (!matches) {
-        log(
-          colors.red(
-            'Did not find required: "' + term + '" in ' + file.relative
-          )
-        );
-        log(colors.blue('=========='));
+        log(red('Did not find required: "' + term + '" in ' + file.relative));
+        log(blue('=========='));
         return true;
       }
       return false;
@@ -1408,15 +1418,11 @@ function presubmit() {
     )
     .on('end', function () {
       if (forbiddenFound) {
-        log(
-          colors.blue(
-            'Please remove these usages or consult with the AMP team.'
-          )
-        );
+        log(blue('Please remove these usages or consult with the AMP team.'));
       }
       if (missingRequirements) {
         log(
-          colors.blue(
+          blue(
             'Adding these terms (e.g. by adding a required LICENSE ' +
               'to the file)'
           )

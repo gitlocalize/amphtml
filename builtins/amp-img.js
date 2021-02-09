@@ -45,15 +45,17 @@ const ATTRIBUTES_TO_PROPAGATE = [
 ];
 
 export class AmpImg extends BaseElement {
+  /** @override @nocollapse */
+  static prerenderAllowed() {
+    return true;
+  }
+
   /** @param {!AmpElement} element */
   constructor(element) {
     super(element);
 
     /** @private {boolean} */
     this.allowImgLoadFallback_ = true;
-
-    /** @private {?boolean} */
-    this.prerenderAllowed_ = null;
 
     /** @private {?Element} */
     this.img_ = null;
@@ -105,11 +107,6 @@ export class AmpImg extends BaseElement {
         guaranteeSrcForSrcsetUnsupportedBrowsers(this.img_);
       }
     }
-  }
-
-  /** @override */
-  onMeasureChanged() {
-    this.maybeGenerateSizes_(/* sync */ false);
   }
 
   /** @override */
@@ -214,7 +211,7 @@ export class AmpImg extends BaseElement {
       return;
     }
 
-    const width = this.element.getLayoutWidth();
+    const {width} = this.element.getLayoutSize();
     if (!this.shouldSetSizes_(width)) {
       return;
     }
@@ -254,14 +251,6 @@ export class AmpImg extends BaseElement {
   }
 
   /** @override */
-  prerenderAllowed() {
-    if (this.prerenderAllowed_ == null) {
-      this.prerenderAllowed_ = !this.element.hasAttribute('noprerender');
-    }
-    return this.prerenderAllowed_;
-  }
-
-  /** @override */
   reconstructWhenReparented() {
     return false;
   }
@@ -272,7 +261,8 @@ export class AmpImg extends BaseElement {
     const img = dev().assertElement(this.img_);
     this.unlistenLoad_ = listen(img, 'load', () => this.hideFallbackImg_());
     this.unlistenError_ = listen(img, 'error', () => this.onImgLoadingError_());
-    if (this.element.getLayoutWidth() <= 0) {
+    const {width} = this.element.getLayoutSize();
+    if (width <= 0) {
       return Promise.resolve();
     }
     return this.loadPromise(img);

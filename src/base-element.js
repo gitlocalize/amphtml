@@ -97,15 +97,29 @@ import {isArray, toWin} from './types';
  * element instance. This can be used to do additional style calculations
  * without triggering style recalculations.
  *
- * When the dimensions of an element has changed, the 'onMeasureChanged'
- * callback is called.
- *
  * For more details, see {@link custom-element.js}.
  *
  * Each method is called exactly once and overriding them in subclasses
  * is optional.
+ * @implements {BaseElementInterface}
  */
 export class BaseElement {
+  /**
+   * Subclasses can override this method to opt-in into being called to
+   * prerender when document itself is not yet visible (pre-render mode).
+   *
+   * The return value of this function is used to determine whether or not the
+   * element will be built _and_ laid out during prerender mode. Therefore, any
+   * changes to the return value _after_ buildCallback() will have no affect.
+   *
+   * @param {!AmpElement} unusedElement
+   * @return {boolean}
+   * @nocollapse
+   */
+  static prerenderAllowed(unusedElement) {
+    return false;
+  }
+
   /** @param {!AmpElement} element */
   constructor(element) {
     /** @public @const {!Element} */
@@ -123,9 +137,6 @@ export class BaseElement {
     the private property in the extensions compilation unit's private
     properties.
     */
-
-    /** @package {!Layout} */
-    this.layout_ = Layout.NODISPLAY;
 
     /** @public @const {!Window} */
     this.win = toWin(element.ownerDocument.defaultView);
@@ -192,7 +203,7 @@ export class BaseElement {
 
   /** @return {!Layout} */
   getLayout() {
-    return this.layout_;
+    return this.element.getLayout();
   }
 
   /**
@@ -206,12 +217,11 @@ export class BaseElement {
   }
 
   /**
-   * Returns a previously measured layout box relative to the page. The
-   * fixed-position elements are relative to the top of the document.
-   * @return {!./layout-rect.LayoutRectDef}
+   * Returns a previously measured layout size.
+   * @return {!./layout-rect.LayoutSizeDef}
    */
-  getPageLayoutBox() {
-    return this.element.getPageLayoutBox();
+  getLayoutSize() {
+    return this.element.getLayoutSize();
   }
 
   /**
@@ -340,19 +350,6 @@ export class BaseElement {
    */
   detachedCallback() {
     // Subclasses may override.
-  }
-
-  /**
-   * Subclasses can override this method to opt-in into being called to
-   * prerender when document itself is not yet visible (pre-render mode).
-   *
-   * The return value of this function is used to determine whether or not the
-   * element will be built _and_ laid out during prerender mode. Therefore, any
-   * changes to the return value _after_ buildCallback() will have no affect.
-   * @return {boolean}
-   */
-  prerenderAllowed() {
-    return false;
   }
 
   /**
@@ -486,6 +483,14 @@ export class BaseElement {
    */
   unlayoutOnPause() {
     return false;
+  }
+
+  /**
+   * Unloads the element.
+   * @final
+   */
+  unload() {
+    this.element.getResources().getResourceForElement(this.element).unload();
   }
 
   /**
@@ -943,16 +948,20 @@ export class BaseElement {
   onLayoutMeasure() {}
 
   /**
-   * Called only when the measurements of an amp-element changes. This
-   * would not trigger for every measurement invalidation caused by a mutation.
-   * @public
-   */
-  onMeasureChanged() {}
-
-  /**
    * @return {./log.Log}
    */
   user() {
     return user(this.element);
+  }
+
+  /**
+   * Returns this BaseElement instance. This is equivalent to Bento's
+   * imperative API object, since this is where we define the element's custom
+   * APIs.
+   *
+   * @return {!Promise<!Object>}
+   */
+  getApi() {
+    return this;
   }
 }

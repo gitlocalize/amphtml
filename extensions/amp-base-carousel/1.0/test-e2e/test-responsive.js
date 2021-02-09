@@ -21,12 +21,11 @@ const pageWidth = 1000;
 const pageHeight = 600;
 
 describes.endtoend(
-  'AMP Carousel responsive attributes',
+  'amp-base-carousel - responsive attributes',
   {
-    testUrl:
-      'http://localhost:8000/test/manual/amp-base-carousel/1.0/' +
-      'responsive.amp.html',
-    experiments: ['amp-base-carousel-bento'],
+    version: '1.0',
+    fixture: 'amp-base-carousel/responsive.amp.html',
+    experiments: ['bento-carousel'],
     initialRect: {width: pageWidth, height: pageHeight},
     environments: ['single', 'viewer-demo'],
   },
